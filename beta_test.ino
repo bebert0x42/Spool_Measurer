@@ -1,140 +1,135 @@
-
 /* Beta test code pour projet PIC IMT11 SpoolMeasurer */
 /* Programme de test du materiel*/
 
 #include <TimerOne.h>
-
 #include <LiquidCrystal_I2C.h>
 
+//******* Déclaration des Pin de l'arduino **********
 
-// directions
-#define FORWARD   HIGH
-#define BACKWARD  LOW
+	// PIN pour le Driver/Moteur A4988
+	#define PIN_STEP  9
+	#define PIN_DIR   8
+	#define PIN_ENABLE_DRIVER 10
 
-// debounce time (milliseconds)
-#define DEBOUNCE_TIME  200
+	LiquidCrystal_I2C lcd(0x27, 16, 2);// définit le type d'écran lcd avec connexion I2C sur les PIN SLA SCL
 
-// PINs for A4988 driver
-#define PIN_STEP  9
-#define PIN_DIR   8
-#define PIN_ENABLE_DRIVER   10
+	//Pin du Joystick
+	const int PIN_X = A0; // analog pin connected to X output
+	const int PIN_Y = A1; // analog pin connected to Y output
+	const int PIN_CLICK = 3;// Digital pin connected to Y output
+	//Pin Fourche Optique
+	const byte PIN_FOURCHE = 2; //Digital Pin connected to optical switch
 
+//******* Déclaration des Variables de statu *************
+	//Variable des bouton joystick
+	bool X_PLUS = 0;
+	bool X_MOIN = 0;
+	bool Y_PLUS = 0;
+	bool Y_MOIN = 0;
+	bool CLICK = 0;
 
-#define PIN_CLICK  A2 
+	// Variable de statu
+	bool MOTOR_RUN = 0;
+	bool MOTOR_ENABLE = 0;
 
-//Pin du Joystick
-const int PIN_X = A0; // analog pin connected to X output
-const int PIN_Y = A1; // analog pin connected to Y output
-const int PIN_FOURCHE = 2; // analog pin connected to Y output
-
-//Variable des bouton joystick
-bool X_PLUS = 0;
-bool X_MOIN = 0;
-bool Y_PLUS = 0;
-bool Y_MOIN = 0;
-bool CLICK = 0;
-
-// Variable de statu
-bool MOTOR_RUN = 0;
-boolean PREVIOUS_MEASURE = LOW;
-bool MOTOR_ENABLE = 0;
-
-// lookup table speed - ticks (interrupts)
-const int speed_ticks[] = {-1, 400,375,350,325,300,275,250,225,200,175,150,125,110,100,90,85,80,75,70,65,60,55,50};
-size_t max_speed = (sizeof(speed_ticks) / sizeof(speed_ticks[0])) -1 ; // nombre de variable dans le tableau
+	// Variable de de fenetre IHM
+	bool window_Menu = 0;
+	bool window_Manual = 0;
+	bool window_Auto = 0;
 
 
-// global variables
-LiquidCrystal_I2C lcd(0x27, 16, 2);// définit le type d'écran lcd pour ma part j'utilise un 16 x 2
+//******* Variable pour le fonctinnement moteur **********
+	int actual_speed;
+	int actual_direction;
+	int target_speed;
+	int ticks;
+	int tick_count;
+	// Constante de direction du moteur
+	#define FORWARD   HIGH
+	#define BACKWARD  LOW
 
-int measurement = 0;
-volatile unsigned int counter;
+//*********** Parametre de vitesse du moteur ***************
+
+	const int speed_ticks[] = {-1, 400,375,350,325,300,275,250,225,200,175,150,125,110,100,90,85,80,75,70,65,60,55,50};
+	size_t max_speed = (sizeof(speed_ticks) / sizeof(speed_ticks[0])) -1 ; // nombre de variable dans le tableau
 
 
-int actual_speed;
-int actual_direction;
-int target_speed;
 
-int ticks;
-int tick_count;
+//******* Variable pour la fonction de mesure **********
 
-int button;
-boolean debounce;
-int previous_time;
+	volatile unsigned int  counter_steps=0;// Compteur du nombre de steps de la roue codeuse
+	volatile float measurement = 0; //mesure a afficher sur l'IHM
+	//                           IIIII
+	//                           IIIII
+	//     Variable pour         IIIII
+	//      la calibration     IIIIIIIII
+	//                          IIIIIII
+	//                           IIII
+	//                            II
+	const float perimeter_gear = 33.9; //périmetre de la roue denté de mesure en mm
+	const int encoder_hole = 2;//nombre de fenetre sur la roue codeuse
 
-// custom LCD square symbol for progress bar
-byte square_symbol[8] = {
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-};
 
-// string constants
-char forward_arrow[] = "-->";
-char backward_arrow[] = "<--";
 
-void pulsecount(){
-    counter++;
-}
 
+/*
+ * =============================================================================================
+ * ========================================= Setup =============================================
+ * =============================================================================================
+*/
 void setup() {
-  
-  digitalWrite(PIN_ENABLE_DRIVER, HIGH);// Désactivation du moteur
-  // init the timer1, interrupt every 0.1ms
-  Timer1.initialize(20);
-  Timer1.attachInterrupt(timerIsr);
-  
+	
+	digitalWrite(PIN_ENABLE_DRIVER, HIGH);// Désactivation du moteur avant le setup
 
- 
-  lcd.init();// initialize the lcd 
-  //lcd.init();
-  lcd.backlight();
+	// initial values
+  	actual_speed = 0;
+  	target_speed = max_speed/2;
+  	actual_direction = BACKWARD;
+  	tick_count = 0;
+  	ticks = -1;
+	
+	// Init du Timer1, interrupt toute les 0.1ms pour lancer un step moteur
+	Timer1.initialize(20);
+	Timer1.attachInterrupt(timerMotor);
+	
+	// Init de l'interrupt de compteur de la fourche optique en fonction du soulevement du signal
+	attachInterrupt(digitalPinToInterrupt(PIN_FOURCHE), measure_filament, RISING);
 
-  // Pin Fourche
-  pinMode(PIN_FOURCHE, INPUT);
-  
-  // pins DRIVER
-  pinMode(PIN_ENABLE_DRIVER, OUTPUT);
-  attachInterrupt(0, pulsecount, RISING);
-  
-  digitalWrite(PIN_ENABLE_DRIVER, HIGH);// Désactivation du moteur
-  pinMode(PIN_STEP, OUTPUT);
-  pinMode(PIN_DIR, OUTPUT);
-  
-  // initial values
-  actual_speed = 0;
-  target_speed = max_speed/2;
-  actual_direction = BACKWARD;
-  tick_count = 0;
-  ticks = -1;
-  debounce = false;
+	//Initialisation du LCD I2C
+	lcd.init();
+	lcd.backlight();
 
-  digitalWrite(PIN_DIR, actual_direction);
-    
-  updateLCD();
+	//Initialisation des PIN
+  	
+	// pins DRIVER
+  	pinMode(PIN_ENABLE_DRIVER, OUTPUT);
+	digitalWrite(PIN_ENABLE_DRIVER, HIGH);// Désactivation du moteur
+  	pinMode(PIN_STEP, OUTPUT);
+  	pinMode(PIN_DIR, OUTPUT);
+	digitalWrite(PIN_DIR, actual_direction);
+
+  	// Pin Fourche ??????????????????????????????????????????????????????
+  	pinMode(PIN_FOURCHE, INPUT_PULLUP);
+
 }
-  
+/*
+ * =============================================================================================
+ * ======================================== Main Loop ==========================================
+ * =============================================================================================
+*/
 void loop() {
-  
-  // check if debounce active
-  /*if(debounce) {
-    button = btnNONE;
-    if(millis() > previous_time + DEBOUNCE_TIME) debounce = false;
-  } else button = read_buttons();
-  */
-  //measure_filament();
 
-  read_buttons() ;//Read X and Y on joystick
-  if (MOTOR_RUN){
-    increase_speed();
-  }
-  else {
-    decrease_speed();
-  }
+	updateLCD();		// Mise a jours du LCD
+	read_joystick();	// Lectue Joystick
+
+	if (MOTOR_RUN){
+	increase_speed();
+	}
+	else {
+	decrease_speed();
+	}
+
+
   /*// check which button was pressed
   switch(button) {
     
@@ -155,11 +150,15 @@ void loop() {
       break;
   }*/
   
-  // finally update the LCD
-  updateLCD();
+  
+  
 }
 
-// increase speed if it's below the max (70)
+/********************************* Fonction Diminution de la vitesse Moteur *********************
+ * 
+ * - Augmentation de la vitesse moteur en fonction des valeurs du tableau speed_ticks
+ * 
+************************************************************************************************/
 void increase_speed() {
   
   if(actual_speed < target_speed) {
@@ -172,11 +171,15 @@ void increase_speed() {
     tick_count = 0;
     ticks = speed_ticks[actual_speed];
   }
-  measure_filament();
+  
 
 }
 
-// decrease speed if it's above the min (0)
+/********************************* Fonction Diminution de la vitesse Moteur *********************
+ * 
+ * - Diminution de la vitesse moteur en fonction des valeurs du tableau speed_ticks
+ * 
+************************************************************************************************/
 void decrease_speed() {
   
   if(actual_speed > 0) {
@@ -184,152 +187,137 @@ void decrease_speed() {
     tick_count = 0;
     ticks = speed_ticks[actual_speed];
   }
-
+  
 }
 
 
-// emergency stop: speed 0
+/********************************* Fonction arret d'urgence Moteur ******************************
+ * 
+ * - Non utilisé
+ * 
+************************************************************************************************/
 void emergency_stop() {
   actual_speed = 0;
   tick_count = 0;
   ticks = speed_ticks[actual_speed / 5];
 }
 
-// update LCD
+/********************************* Update LCD **************************************************
+ *
+ * - Fonction qui met a jours l'IHM en fonction de la fenetre dans lequels on est 
+ * 
+************************************************************************************************/
 void updateLCD() {
   
-  // print first line:
-  // Speed: xxxRPM --> (or <--)
-  lcd.setCursor(0,0);
-  lcd.print("Speed: ");
-  lcd.print(actual_speed);
-  lcd.print("RPM ");
+	lcd.setCursor(0,0);
+	lcd.print("Speed: ");
+	lcd.print(actual_speed);
+	lcd.print("RPM ");
 
-  lcd.setCursor(13,0);
-  if(actual_direction == FORWARD) lcd.print(forward_arrow);
-  else lcd.print(backward_arrow);
-  
-      /*// print second line:
-      // progress bar [#####         ]
-      // 15 speed steps: 0 - 5 - 10 - ... - 70
-      lcd.setCursor(0,1);
-      lcd.print("[");
-      
-      for(int i = 1; i <= 14; i++) {
-        
-        if(actual_speed > (5 * i) - 1) lcd.write(byte(0));
-        else lcd.print(" ");
-      }
-      
-      lcd.print("]");*/
- 
-  lcd.setCursor(0,1);
-  lcd.print("        ");
-  lcd.setCursor(0,1);
-  lcd.print(counter);
-  lcd.setCursor(8,1);
-  lcd.print(target_speed);
+	// Calcule de la mesure réell de filament.
+	measurement = ((counter_steps * perimeter_gear)/encoder_hole)/1000;
+
+	lcd.setCursor(0,1);
+	lcd.print(counter_steps);
+	lcd.print("   ");
 } 
 
-// timer1 interrupt function
-void timerIsr() {
-  
-  if(actual_speed == 0) return;
+/********************************* Fonction TimerMotor *****************************************
+ *
+ * - Fonction lancé toute les 20ms avec au Timer1
+ * - Fait tourner le moteur un tour en fonction de la vitesse
+ * 
+************************************************************************************************/
+void timerMotor() {
+	if(actual_speed == 0) return;
 
-  digitalWrite(PIN_ENABLE_DRIVER, LOW);// Activation du moteur
-  MOTOR_ENABLE = 1;
-  
-  tick_count++;
-  
-  if(tick_count == ticks) {  
-    
-    // make a step
-    digitalWrite(PIN_STEP, HIGH);
-    digitalWrite(PIN_STEP, LOW);
-    
-    tick_count = 0;
-  }
+	digitalWrite(PIN_ENABLE_DRIVER, LOW);// Activation du moteur
+	MOTOR_ENABLE = 1;//Flag motor en marche
+
+	tick_count++;
+
+	if(tick_count == ticks) {  
+		// 1 step du moteur
+		digitalWrite(PIN_STEP, HIGH);
+		digitalWrite(PIN_STEP, LOW);
+
+		tick_count = 0;
+	}
 }
 
 
-// read Joystick connected to a single analog pin
-int measure_filament() {
-  int CURRENT_MEASURE = digitalRead(PIN_FOURCHE);
-  if (PREVIOUS_MEASURE != CURRENT_MEASURE) {
-         if( CURRENT_MEASURE == HIGH ) // If input only changes from LOW to HIGH
-       {
-             measurement += 1;
-       }
-  }
-  PREVIOUS_MEASURE = CURRENT_MEASURE;
+/********************************* Fonction de compteur de tour par interupt *******************
+ *
+ *  - Ajoute 1 à la variable compteur_hole
+ * - la roue codeuse comporte 2 Hole --> + 2 au compteur_hole = 1 tours
+ * 
+************************************************************************************************/
+void measure_filament() {
+	if (digitalRead(PIN_FOURCHE)){
+		counter_steps += 1;
+	}
 }
 
 
+/********************************* Fonction de Lecture du Joystick *****************************
+ *
+ *  - Lit le joystick en X et Y sur les pin Analog
+ * - Mets à jours l'IHM en fonction des fenetre dans lequel ce trouve l'utilisateur
+ * - Mets à jours les Flags Y_PLUS et Y_MOINS
+ * 
+************************************************************************************************/
 
-// read Joystick connected to a single analog pin
-int read_buttons() {
+void read_joystick() {
 
-  int XValue = analogRead(PIN_X);     // Read the analog value from The X-axis from the joystick
-  int YValue = analogRead(PIN_Y);     // Read the analog value from The Y-axis from the joystick
-  
-
-  if (!Y_PLUS & !Y_MOIN){
-      if (YValue < 10){ // joystick Y - -> reduce speed
-            /*if (motorSpeed >= motorMaxSpeed){
-              motorSpeed= motorMaxSpeed;
-            }
-            else{
-               motorSpeed = motorSpeed +100 ;
-            }*/
-            Y_MOIN = 1;
-            Y_PLUS = 0;
-      }
-      else if (YValue > 800 ){ // joystick Y +  -> rise speed
-             /*if (motorSpeed > 0){
-              motorSpeed = motorSpeed -100;
-             }*/
-             Y_MOIN = 0;
-             Y_PLUS = 1;
-      }
-      }
-      else if (YValue < 800 && YValue > 50 && actual_speed > 0 ){        // Y en home position      
-        Y_MOIN = 0;
-        Y_PLUS = 0;
-     } 
+	int XValue = analogRead(PIN_X);     // Read the analog value from The X-axis from the joystick
+	int YValue = analogRead(PIN_Y);     // Read the analog value from The Y-axis from the joystick
 
 
-    if (XValue < 400 && XValue > 10){ // joystick X - -> Stop motor
-        if (MOTOR_RUN && target_speed > 5 ){
-          target_speed = target_speed - 1;
-      }
+  	if (!Y_PLUS & !Y_MOIN){
+		if (YValue < 10){ // joystick Y - -> reduce speed
+			Y_MOIN = 1;
+			Y_PLUS = 0;
+		}
+		else if (YValue > 800 ){ // joystick Y +  -> rise speed
+			Y_MOIN = 0;
+			Y_PLUS = 1;
+		}
+	}
+	else if (YValue < 800 && YValue > 50 && actual_speed > 0 ){        // Y en home position      
+		Y_MOIN = 0;
+		Y_PLUS = 0;
+	} 
+
+
+    if (XValue < 400 && XValue > 10){ // joystick X - -> reduce motor speed
+		if (MOTOR_RUN && target_speed > 5 ){
+			target_speed = target_speed - 1;
+      	}
     }
-
-
     else if (XValue < 10){ // joystick X - -> Stop motor
         if (MOTOR_RUN){
-          MOTOR_RUN = 0;
+          	MOTOR_RUN = 0;
         }
         else if ( actual_speed <= 0){
-          Y_MOIN = 0;
-          Y_PLUS = 0;
-          MOTOR_ENABLE = 0;
-          digitalWrite(PIN_ENABLE_DRIVER, HIGH);
+			Y_MOIN = 0;
+			Y_PLUS = 0;
+			MOTOR_ENABLE = 0;
+			digitalWrite(PIN_ENABLE_DRIVER, HIGH);
         }
         
       }
+	      
+   else if (XValue > 800){ // joystick X + -> Start motor or Speed
+      	if (!MOTOR_RUN){
+			target_speed = max_speed/2;
+			MOTOR_RUN = 1;
+		}
 
-
-      
-   if (XValue > 800){ // joystick X + -> Start motor or Speed
-      if (!MOTOR_RUN){
-        target_speed = max_speed/2;
-        MOTOR_RUN = 1;
-      }
-      if (MOTOR_RUN){
-        if (target_speed < max_speed){
-          target_speed += 1;
-        }
-      }
+		if (MOTOR_RUN){
+			if (target_speed < max_speed){
+				target_speed += 1;
+			}
+      	}
         
-      }
+    }
 }
