@@ -14,28 +14,32 @@
 	LiquidCrystal_I2C lcd(0x27, 16, 2);// définit le type d'écran lcd avec connexion I2C sur les PIN SLA SCL
 
 	//Pin du Joystick
-	const int PIN_X = A0; // analog pin connected to X output
-	const int PIN_Y = A1; // analog pin connected to Y output
-	const int PIN_CLICK = 3;// Digital pin connected to Y output
+	const int PIN_X 		= A0; // analog pin connected to X output
+	const int PIN_Y 		= A1; // analog pin connected to Y output
+	const int PIN_CLICK 	= 3;// Digital pin connected to Y output
 	//Pin Fourche Optique
-	const byte PIN_FOURCHE = 2; //Digital Pin connected to optical switch
+	const byte PIN_FOURCHE 	= 2; //Digital Pin connected to optical switch
 
 //******* Déclaration des Variables de statu *************
 	//Variable des bouton joystick
-	bool X_PLUS = 0;
-	bool X_MOIN = 0;
-	bool Y_PLUS = 0;
-	bool Y_MOIN = 0;
-	bool CLICK = 0;
+	bool X_PLUS 			= 0;
+	bool X_MOIN 			= 0;
+	bool Y_PLUS 			= 0;
+	bool Y_MOIN 			= 0;
+	bool CLICK 				= 0;
 
 	// Variable de statu
-	bool MOTOR_RUN = 0;
-	bool MOTOR_ENABLE = 0;
+	bool MOTOR_RUN 			= 0;
+	bool MOTOR_ENABLE 		= 0;
 
 	// Variable de de fenetre IHM
-	bool window_Menu = 0;
-	bool window_Manual = 0;
-	bool window_Auto = 0;
+	bool window_Menu 		= 0;
+	bool window_Manual_run 	= 0;
+	bool window_Auto_init 	= 0;
+	bool window_Auto_run 	= 0;
+	bool window_Paused 		= 0;
+	bool window_Finish 		= 0;
+	bool window_Fail 		= 0;
 
 
 //******* Variable pour le fonctinnement moteur **********
@@ -59,6 +63,7 @@
 
 	volatile unsigned int  counter_steps=0;// Compteur du nombre de steps de la roue codeuse
 	volatile float measurement = 0; //mesure a afficher sur l'IHM
+	volatile float measurement_target = 0; //La mesure ciblé
 	//                           IIIII
 	//                           IIIII
 	//     Variable pour         IIIII
@@ -78,7 +83,7 @@
  * =============================================================================================
 */
 void setup() {
-	
+
 	digitalWrite(PIN_ENABLE_DRIVER, HIGH);// Désactivation du moteur avant le setup
 
 	// initial values
@@ -123,10 +128,10 @@ void loop() {
 	read_joystick();	// Lectue Joystick
 
 	if (MOTOR_RUN){
-	increase_speed();
+		increase_speed();
 	}
 	else {
-	decrease_speed();
+		decrease_speed();
 	}
 
 
@@ -150,8 +155,6 @@ void loop() {
       break;
   }*/
   
-  
-  
 }
 
 /********************************* Fonction Diminution de la vitesse Moteur *********************
@@ -167,12 +170,10 @@ void increase_speed() {
     ticks = speed_ticks[actual_speed];
   }
   else if (actual_speed > target_speed){
-    actual_speed -= 1;
-    tick_count = 0;
-    ticks = speed_ticks[actual_speed];
+	actual_speed -= 1;
+	tick_count = 0;
+	ticks = speed_ticks[actual_speed];
   }
-  
-
 }
 
 /********************************* Fonction Diminution de la vitesse Moteur *********************
@@ -186,10 +187,8 @@ void decrease_speed() {
     actual_speed -= 1;
     tick_count = 0;
     ticks = speed_ticks[actual_speed];
-  }
-  
+  } 
 }
-
 
 /********************************* Fonction arret d'urgence Moteur ******************************
  * 
@@ -201,26 +200,6 @@ void emergency_stop() {
   tick_count = 0;
   ticks = speed_ticks[actual_speed / 5];
 }
-
-/********************************* Update LCD **************************************************
- *
- * - Fonction qui met a jours l'IHM en fonction de la fenetre dans lequels on est 
- * 
-************************************************************************************************/
-void updateLCD() {
-  
-	lcd.setCursor(0,0);
-	lcd.print("Speed: ");
-	lcd.print(actual_speed);
-	lcd.print("RPM ");
-
-	// Calcule de la mesure réell de filament.
-	measurement = ((counter_steps * perimeter_gear)/encoder_hole)/1000;
-
-	lcd.setCursor(0,1);
-	lcd.print(counter_steps);
-	lcd.print("   ");
-} 
 
 /********************************* Fonction TimerMotor *****************************************
  *
@@ -244,6 +223,7 @@ void timerMotor() {
 		tick_count = 0;
 	}
 }
+
 
 
 /********************************* Fonction de compteur de tour par interupt *******************
@@ -320,4 +300,158 @@ void read_joystick() {
       	}
         
     }
+}
+
+/********************************* Update LCD **************************************************
+ *
+ * - Fonction qui met a jours l'IHM en fonction de la fenetre dans lequels on est
+ * - Nom des fenetres :
+ * 		- window_Menu
+ * 		- window_Manual_run
+ * 		- window_Auto_init
+ * 		- window_Auto_run
+ * 		- window_Paused
+ * 		- window_Finish
+ * 		- window_Fail
+ *  
+ * 
+************************************************************************************************/
+void updateLCD() {
+
+	if (window_Menu)
+	{
+		//********| Spool Measurer |*********//
+		//********|<-Manual  Auto->|*********//
+		lcd.setCursor(0, 0);
+		lcd.print(" Spool Measurer ");
+		lcd.setCursor(0, 1);
+		lcd.print("<-Manual  Auto->");
+	}
+	else if (window_Manual_run)
+	{
+		//********|M.   Lgt:  1.93m|*********//
+		//********|  Speed:0   rpm |*********//
+		lcd.setCursor(0, 0);
+		lcd.print("M.   Lgt:");
+		lcd.setCursor(9, 0);
+		lcd.print("      ");
+		lcd.setCursor(9, 0);
+		lcd.print(measurement);
+		lcd.setCursor(15, 0);
+		lcd.print("m");
+		lcd.setCursor(0, 1);
+		lcd.print("  Speed:");
+		lcd.setCursor(9, 1);
+		lcd.print("    ");
+		lcd.setCursor(9, 1);
+		lcd.print(actual_speed);
+		lcd.setCursor(12, 1);
+		lcd.print("rpm ");
+	}
+	else if (window_Auto_init)
+	{
+		//********| Choose length! |*********//
+		//********| Lgt:  23.01 m  |*********//
+		lcd.setCursor(0, 0);
+		lcd.print(" Choose length! ");
+		lcd.setCursor(0, 1);
+		lcd.print(" Lgt: ");
+		lcd.setCursor(6, 1);
+		lcd.print("      ");
+		lcd.setCursor(6, 1);
+		lcd.print(measurement);
+		lcd.setCursor(12, 1);
+		lcd.print(" m  ");
+	}
+	else if (window_Auto_run)
+	{
+		//********| 002.22m/230.00m|*********//
+		//********|  Speed:0   rpm |*********//
+		lcd.setCursor(0, 0);
+		lcd.print(" ");
+		lcd.setCursor(1, 0);
+		lcd.print("      ");
+		lcd.setCursor(1, 0);
+		lcd.print(measurement);
+		lcd.setCursor(7, 0);
+		lcd.print("m/");
+		lcd.setCursor(9, 0);
+		lcd.print("      ");
+		lcd.setCursor(9, 0);
+		lcd.print(measurement_target);
+		lcd.setCursor(15, 0);
+		lcd.print("m");
+
+		lcd.setCursor(0, 1);
+		lcd.print("  Speed:");
+		lcd.setCursor(9, 1);
+		lcd.print("    ");
+		lcd.setCursor(9, 1);
+		lcd.print(actual_speed);
+		lcd.setCursor(12, 1);
+		lcd.print("rpm ");
+	}
+	else if (window_Paused)
+	{
+		//********|     Paused     |*********//
+		//********|     23.01 m    |*********//
+		lcd.setCursor(0, 0);
+		lcd.print("     PAUSED     ");
+		lcd.setCursor(0, 1);
+		lcd.print("    ");
+		lcd.setCursor(4, 1);
+		lcd.print("      ");
+		lcd.setCursor(4, 1);
+		lcd.print(measurement);
+		lcd.setCursor(9, 1);
+		lcd.print(" m    ");
+	}
+	else if (window_Finish)
+	{
+		//********|   Finished !   |*********//
+		//********|     23.01 m    |*********//
+		lcd.setCursor(0, 0);
+		lcd.print("   Finished !   ");
+		lcd.setCursor(0, 1);
+		lcd.print("    ");
+		lcd.setCursor(4, 1);
+		lcd.print("      ");
+		lcd.setCursor(4, 1);
+		lcd.print(measurement);
+		lcd.setCursor(9, 1);
+		lcd.print(" m    ");
+	}
+	else if(window_Fail)
+	{
+		//********| System Failure |*********//
+		//********|<-Abort  Retry->|*********//
+		lcd.setCursor(0, 0);
+		lcd.print(" System Failure ");
+		lcd.setCursor(0, 1);
+		lcd.print("<-Abort  Retry->");
+	}
+
+	lcd.setCursor(0,0);
+	lcd.print("Speed: ");
+	lcd.print(actual_speed);
+	lcd.print("RPM ");
+
+	lcd.setCursor(0,1);
+	lcd.print(counter_steps);
+	lcd.print("   ");
+} 
+
+/********************************* Reset ecran IHM **************************************************
+ *
+ * - Fonction remet toute les variables d'écrans LCD à 0
+*
+************************************************************************************************/
+void resetIHM() {
+	window_Menu 		= 0;
+	window_Manual_run 	= 0;
+	window_Auto_init 	= 0;
+	window_Auto_run 	= 0;
+	window_Paused 		= 0;
+	window_Finish 		= 0;
+	window_Fail 		= 0;
 }
