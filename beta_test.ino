@@ -494,7 +494,7 @@ void updateLCD() {
 		lcd.setCursor(12, 1);
 		lcd.print("rpm ");
 	}
-	else if (window_Paused)
+	else if (window_Auto_paused or window_Manu_paused)
 	{
 		//********|     Paused     |*********//
 		//********|     23.01 m    |*********//
@@ -552,9 +552,11 @@ void updateLCD() {
 void resetIHM() {
 	window_Menu 		= 0;
 	window_Manual_run 	= 0;
+	window_Manual_init	= 0;
+	window_Manu_paused	= 0;
 	window_Auto_init 	= 0;
 	window_Auto_run 	= 0;
-	window_Paused 		= 0;
+	window_Auto_paused	= 0;
 	window_Finish 		= 0;
 	window_Fail 		= 0;
 }
