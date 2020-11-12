@@ -1,8 +1,10 @@
+
 /* Beta test code pour projet PIC IMT11 SpoolMeasurer */
 /* Programme de test du materiel*/
 
-#include <LiquidCrystal_I2C.h>
 #include <TimerOne.h>
+
+#include <LiquidCrystal_I2C.h>
 
 
 // directions
