@@ -1,6 +1,5 @@
-/* Beta test code pour projet PIC IMT11 SpoolMeasurer
-/* Programme de test du materiel
-
+/* Beta test code pour projet PIC IMT11 SpoolMeasurer */
+/* Programme de test du materiel*/
 
 #include <LiquidCrystal_I2C.h>
 #include <TimerOne.h>
@@ -25,8 +24,6 @@
 const int PIN_X = A0; // analog pin connected to X output
 const int PIN_Y = A1; // analog pin connected to Y output
 const int PIN_FOURCHE = 2; // analog pin connected to Y output
-
-
 
 //Variable des bouton joystick
 bool X_PLUS = 0;
