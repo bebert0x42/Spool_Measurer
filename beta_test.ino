@@ -33,11 +33,13 @@
 	bool MOTOR_ENABLE 		= 0;
 
 	// Variable de de fenetre IHM
-	bool window_Menu 		= 0;
+	bool window_Menu 		= 1;
 	bool window_Manual_run 	= 0;
+	bool window_Manual_init	= 0;
+	bool window_Manu_paused	= 0;
 	bool window_Auto_init 	= 0;
 	bool window_Auto_run 	= 0;
-	bool window_Paused 		= 0;
+	bool window_Auto_paused	= 0;
 	bool window_Finish 		= 0;
 	bool window_Fail 		= 0;
 
@@ -157,6 +159,98 @@ void loop() {
   
 }
 
+/********************************* Programme principal ****************************************
+ * 
+ *  - fonctionement du programme suivant la séquence IHM (voir fichier)
+ * 
+************************************************************************************************/
+void ruuning_program() {
+	if (window_Menu){
+		if(Y_MOIN){
+			resetIHM();
+			window_Manual_run = 1;
+			while (Y_MOIN){}
+		}
+		else if(Y_PLUS){
+			resetIHM();
+			window_Auto_init = 1;
+			while (Y_PLUS){}
+		}
+	}
+	else if(window_Manual_init)
+	{
+		if(Y_MOIN){
+			resetIHM();
+			window_Menu = 1;
+			while (Y_MOIN){}
+		}
+		else if(Y_PLUS){
+			resetIHM();
+			window_Manual_run = 1;
+			MOTOR_RUN = 1;
+			while (Y_PLUS){}
+		}
+	}
+	else if(window_Manual_run)
+	{
+		if(Y_MOIN){
+			MOTOR_RUN = 0;
+			resetIHM();
+			window_Manu_paused = 1;
+			while (Y_MOIN){}
+		}
+	}
+	else if(window_Manu_paused)
+	{
+		if(Y_MOIN){
+			resetIHM();
+			window_Finish = 1;
+			while (Y_MOIN){}
+		}
+		if(Y_PLUS){
+			resetIHM();
+			MOTOR_RUN = 1 ;
+			window_Manual_run = 1;
+			while (Y_PLUS){}
+		}
+	}
+	else if(window_Finish)
+	{
+		if(Y_MOIN or Y_PLUS){
+			resetIHM();
+			window_Menu = 1;
+			while (Y_MOIN or Y_PLUS){}
+		}
+	}
+	else if(window_Auto_init){
+		if(Y_MOIN){
+			resetIHM();
+			window_Menu = 1;
+			while (Y_MOIN){}
+		}
+		else if(Y_PLUS){
+			resetIHM();
+			window_Auto_run = 1;
+			MOTOR_RUN = 1;
+			while (Y_PLUS){}
+		}
+	//a poursuivre
+	}
+  	else if(window_Auto_run){
+
+	//a poursuivre
+	}
+	else if(window_Auto_paused){
+
+	//a poursuivre
+	}
+	else if(window_Fail){
+
+	//a poursuivre
+	}
+
+ 
+}
 /********************************* Fonction Diminution de la vitesse Moteur *********************
  * 
  * - Augmentation de la vitesse moteur en fonction des valeurs du tableau speed_ticks
@@ -318,7 +412,16 @@ void read_joystick() {
 ************************************************************************************************/
 void updateLCD() {
 
-	if (window_Menu)
+	if(window_Fail)
+	{
+		//********| System Failure |*********//
+		//********|<-Abort  Retry->|*********//
+		lcd.setCursor(0, 0);
+		lcd.print(" System Failure ");
+		lcd.setCursor(0, 1);
+		lcd.print("<-Abort  Retry->");
+	}
+	else if (window_Menu)
 	{
 		//********| Spool Measurer |*********//
 		//********|<-Manual  Auto->|*********//
@@ -327,7 +430,7 @@ void updateLCD() {
 		lcd.setCursor(0, 1);
 		lcd.print("<-Manual  Auto->");
 	}
-	else if (window_Manual_run)
+	else if (window_Manual_run or window_Manual_init)
 	{
 		//********|M.   Lgt:  1.93m|*********//
 		//********|  Speed:0   rpm |*********//
@@ -421,7 +524,7 @@ void updateLCD() {
 		lcd.setCursor(9, 1);
 		lcd.print(" m    ");
 	}
-	else if(window_Fail)
+	else
 	{
 		//********| System Failure |*********//
 		//********|<-Abort  Retry->|*********//
