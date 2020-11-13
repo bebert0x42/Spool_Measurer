@@ -27,6 +27,8 @@
 	bool Y_PLUS 			= 0;
 	bool Y_MOIN 			= 0;
 	bool CLICK 				= 0;
+	bool commande_waiting	= 1;// Variable pour attendre que le joystick se remete en 0
+	bool commande_push		= 0;// Variable pour push une commande joystick
 
 	// Variable de statu
 	bool MOTOR_RUN 			= 0;
@@ -73,7 +75,7 @@
 	//                          IIIIIII
 	//                           IIII
 	//                            II
-	const float perimeter_gear = 33.9; //périmetre de la roue denté de mesure en mm
+	const float perimeter_gear = 0.0339; //périmetre de la roue denté de mesure en mm
 	const int encoder_hole = 2;//nombre de fenetre sur la roue codeuse
 
 
@@ -126,8 +128,10 @@ void setup() {
 */
 void loop() {
 
-	updateLCD();		// Mise a jours du LCD
+	measurement =	counter_steps * perimeter_gear/encoder_hole;
+	ruuning_program();	// Boucle programme principal
 	read_joystick();	// Lectue Joystick
+	updateLCD();		// Mise a jours du LCD
 
 	if (MOTOR_RUN){
 		increase_speed();
@@ -165,16 +169,20 @@ void loop() {
  * 
 ************************************************************************************************/
 void ruuning_program() {
+	if (!commande_push || !commande_waiting){
+		return;
+	}
+
 	if (window_Menu){
+		counter_steps = 0;
+		MOTOR_RUN = 0;
 		if(Y_MOIN){
 			resetIHM();
-			window_Manual_run = 1;
-			while (Y_MOIN){}
+			window_Manual_init = 1;
 		}
 		else if(Y_PLUS){
 			resetIHM();
 			window_Auto_init = 1;
-			while (Y_PLUS){}
 		}
 	}
 	else if(window_Manual_init)
@@ -182,13 +190,12 @@ void ruuning_program() {
 		if(Y_MOIN){
 			resetIHM();
 			window_Menu = 1;
-			while (Y_MOIN){}
 		}
 		else if(Y_PLUS){
 			resetIHM();
 			window_Manual_run = 1;
 			MOTOR_RUN = 1;
-			while (Y_PLUS){}
+			
 		}
 	}
 	else if(window_Manual_run)
@@ -197,7 +204,6 @@ void ruuning_program() {
 			MOTOR_RUN = 0;
 			resetIHM();
 			window_Manu_paused = 1;
-			while (Y_MOIN){}
 		}
 	}
 	else if(window_Manu_paused)
@@ -205,34 +211,29 @@ void ruuning_program() {
 		if(Y_MOIN){
 			resetIHM();
 			window_Finish = 1;
-			while (Y_MOIN){}
 		}
 		if(Y_PLUS){
 			resetIHM();
 			MOTOR_RUN = 1 ;
 			window_Manual_run = 1;
-			while (Y_PLUS){}
 		}
 	}
 	else if(window_Finish)
 	{
-		if(Y_MOIN or Y_PLUS){
+		if(Y_MOIN || Y_PLUS){
 			resetIHM();
 			window_Menu = 1;
-			while (Y_MOIN or Y_PLUS){}
 		}
 	}
 	else if(window_Auto_init){
 		if(Y_MOIN){
 			resetIHM();
 			window_Menu = 1;
-			while (Y_MOIN){}
 		}
 		else if(Y_PLUS){
 			resetIHM();
 			window_Auto_run = 1;
 			MOTOR_RUN = 1;
-			while (Y_PLUS){}
 		}
 	//a poursuivre
 	}
@@ -249,6 +250,8 @@ void ruuning_program() {
 	//a poursuivre
 	}
 
+	
+	commande_waiting = 0;
  
 }
 /********************************* Fonction Diminution de la vitesse Moteur *********************
@@ -346,22 +349,24 @@ void read_joystick() {
 	int XValue = analogRead(PIN_X);     // Read the analog value from The X-axis from the joystick
 	int YValue = analogRead(PIN_Y);     // Read the analog value from The Y-axis from the joystick
 
+	// ************************* Analyse de l'axe Y *********************************
 
-  	if (!Y_PLUS & !Y_MOIN){
-		if (YValue < 10){ // joystick Y - -> reduce speed
+  	if (!Y_PLUS && !Y_MOIN){
+		if (YValue < 10){ // joystick Y - -> 
 			Y_MOIN = 1;
 			Y_PLUS = 0;
 		}
-		else if (YValue > 800 ){ // joystick Y +  -> rise speed
+		else if (YValue > 800 ){ // joystick Y +  -> 
 			Y_MOIN = 0;
 			Y_PLUS = 1;
 		}
 	}
-	else if (YValue < 800 && YValue > 50 && actual_speed > 0 ){        // Y en home position      
+	else if (YValue < 800 && YValue > 50){        // Y en home position      
 		Y_MOIN = 0;
 		Y_PLUS = 0;
 	} 
 
+	// ************************* Analyse de l'axe X *********************************
 
     if (XValue < 400 && XValue > 10){ // joystick X - -> reduce motor speed
 		if (MOTOR_RUN && target_speed > 5 ){
@@ -369,7 +374,10 @@ void read_joystick() {
       	}
     }
     else if (XValue < 10){ // joystick X - -> Stop motor
-        if (MOTOR_RUN){
+        if (MOTOR_RUN && target_speed > 5 ){
+			target_speed = target_speed - 1;
+      	}
+		else if (MOTOR_RUN && target_speed <= 5 ){
           	MOTOR_RUN = 0;
         }
         else if ( actual_speed <= 0){
@@ -378,22 +386,43 @@ void read_joystick() {
 			MOTOR_ENABLE = 0;
 			digitalWrite(PIN_ENABLE_DRIVER, HIGH);
         }
-        
-      }
-	      
-   else if (XValue > 800){ // joystick X + -> Start motor or Speed
+    }
+   	else if (XValue > 800){ // joystick X + -> Start motor or Speed
       	if (!MOTOR_RUN){
 			target_speed = max_speed/2;
-			MOTOR_RUN = 1;
+			//MOTOR_RUN = 1;
 		}
-
 		if (MOTOR_RUN){
 			if (target_speed < max_speed){
 				target_speed += 1;
 			}
       	}
-        
     }
+
+	// ************************* Analyse des Commandes ***************************
+	// Vérifier q'une commande est activé et mettre le programme en attente de 
+	// la prochaine commande.
+
+
+	
+
+	if (commande_waiting)
+	{
+		if (Y_PLUS || Y_MOIN)
+		{
+			commande_push = 1;
+		}
+	}
+	else if(!commande_waiting)
+	{
+		if (!Y_PLUS && !Y_MOIN)
+		{
+			commande_waiting = 1;
+			commande_push = 0;
+		}
+	}
+
+	
 }
 
 /********************************* Update LCD **************************************************
@@ -411,6 +440,9 @@ void read_joystick() {
  * 
 ************************************************************************************************/
 void updateLCD() {
+	lcd.setCursor(0,0);
+	lcd.print(commande_push);
+	lcd.print(commande_waiting);
 
 	if(window_Fail)
 	{
@@ -430,7 +462,7 @@ void updateLCD() {
 		lcd.setCursor(0, 1);
 		lcd.print("<-Manual  Auto->");
 	}
-	else if (window_Manual_run or window_Manual_init)
+	else if (window_Manual_run)
 	{
 		//********|M.   Lgt:  1.93m|*********//
 		//********|  Speed:0   rpm |*********//
@@ -450,6 +482,22 @@ void updateLCD() {
 		lcd.print(actual_speed);
 		lcd.setCursor(12, 1);
 		lcd.print("rpm ");
+	}
+	else if (window_Manual_init)
+	{
+		//********|M.   Lgt:  1.93m|*********//
+		//********|<-Menu   Start->|*********//
+		lcd.setCursor(0, 0);
+		lcd.print("M.   Lgt:");
+		lcd.setCursor(9, 0);
+		lcd.print("      ");
+		lcd.setCursor(9, 0);
+		lcd.print(measurement);
+		lcd.setCursor(15, 0);
+		lcd.print("m");
+		lcd.setCursor(0, 1);
+		lcd.print("<-Menu   Start->");
+		
 	}
 	else if (window_Auto_init)
 	{
@@ -494,7 +542,7 @@ void updateLCD() {
 		lcd.setCursor(12, 1);
 		lcd.print("rpm ");
 	}
-	else if (window_Auto_paused or window_Manu_paused)
+	else if (window_Auto_paused || window_Manu_paused)
 	{
 		//********|     Paused     |*********//
 		//********|     23.01 m    |*********//
@@ -534,14 +582,15 @@ void updateLCD() {
 		lcd.print("<-Abort  Retry->");
 	}
 
-	lcd.setCursor(0,0);
+	/*lcd.setCursor(0,0);
 	lcd.print("Speed: ");
 	lcd.print(actual_speed);
 	lcd.print("RPM ");
 
 	lcd.setCursor(0,1);
 	lcd.print(counter_steps);
-	lcd.print("   ");
+	lcd.print("   ");*/
+	
 } 
 
 /********************************* Reset ecran IHM **************************************************
