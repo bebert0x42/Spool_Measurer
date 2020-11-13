@@ -1,5 +1,16 @@
 /* Beta test code pour projet PIC IMT11 SpoolMeasurer */
 /* Programme de test du materiel*/
+/*
+Liste des Bug et truc a mettre en place :
+- Sur l'ecran Manual Run, si on met la vitesse à 0 on ne peut plus la remonté directement sans passer par un autre menu
+- Sur Auto_Init la modification de la valeure cible ne fonctionne pas bien (a cause des variables commande_push et commande_waiting)
+- Sur Autu_run le joystick gauche vas sur Finished et non sur pause idem pour le droit.
+- Une fois la target atteint le programme continue (sur la fenetre Auto_Run)
+
+A faire :
+- commencer a codes les execptions et les mettres dans le ruuning_program ou loop
+£
+*/
 
 #include <TimerOne.h>
 #include <LiquidCrystal_I2C.h>
@@ -75,7 +86,7 @@
 	//Mesure de la longueure filament à l'instant T (afficher sur l'IHM)
 	volatile float measurement = 0; 
 	//La mesure ciblé de longueure de filament
-	volatile float measurement_target = 0; 
+	volatile float measurement_target = 1; 
 	
 	
 	//                           IIIII
@@ -186,7 +197,7 @@ void loop() {
 ************************************************************************************************/
 void ruuning_program() {
 	if (!commande_push || !commande_waiting){
-		//return; <- A tester VS le fonctionnement du programme en auto
+		return; //<- A tester VS le fonctionnement du programme en auto
 	}
 	
 	
@@ -583,7 +594,7 @@ void updateLCD() {
 		lcd.setCursor(6, 1);
 		lcd.print("      ");
 		lcd.setCursor(6, 1);
-		lcd.print(measurement);
+		lcd.print(measurement_target);
 		lcd.setCursor(12, 1);
 		lcd.print(" m  ");
 	}
