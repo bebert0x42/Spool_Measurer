@@ -30,11 +30,16 @@
 	bool commande_waiting	= 1;// Variable pour attendre que le joystick se remete en 0
 	bool commande_push		= 0;// Variable pour push une commande joystick
 
-	// Variable de statu
-	bool MOTOR_RUN 			= 0;
-	bool MOTOR_ENABLE 		= 0;
+	//****** Variable de statu ******
 
-	// Variable de de fenetre IHM
+	// Démare/arrete le moteur a une vitesse donnée
+	bool MOTOR_RUN 			= 0;
+	// Active/Désactive le moteur et son couple
+	bool MOTOR_ENABLE 		= 0;
+	
+
+	//****** Variable de de fenetre IHM******
+
 	bool window_Menu 		= 1;
 	bool window_Manual_run 	= 0;
 	bool window_Manual_init	= 0;
@@ -65,9 +70,14 @@
 
 //******* Variable pour la fonction de mesure **********
 
-	volatile unsigned int  counter_steps=0;// Compteur du nombre de steps de la roue codeuse
-	volatile float measurement = 0; //mesure a afficher sur l'IHM
-	volatile float measurement_target = 0; //La mesure ciblé
+	//Compteur du nombre de steps de la roue codeuse
+	volatile unsigned int  counter_steps=0;
+	//Mesure de la longueure filament à l'instant T (afficher sur l'IHM)
+	volatile float measurement = 0; 
+	//La mesure ciblé de longueure de filament
+	volatile float measurement_target = 0; 
+	
+	
 	//                           IIIII
 	//                           IIIII
 	//     Variable pour         IIIII
@@ -75,9 +85,15 @@
 	//                          IIIIIII
 	//                           IIII
 	//                            II
-	const float perimeter_gear = 0.0339; //périmetre de la roue denté de mesure en mm
-	const int encoder_hole = 2;//nombre de fenetre sur la roue codeuse
 
+	//périmetre de la roue denté de mesure en mm
+	const float perimeter_gear = 0.0339;
+	//nombre de fenetre sur la roue codeuse
+	const int encoder_hole = 2;
+	//Course de la bobine lors de la décélération de 75 RPM à 0
+	const float distance_deceleration_high = 40.0;
+	//Course de la bobine lors de la décélération de 35 RPM à 0
+	const float distance_deceleration_low = 20.0;
 
 
 
@@ -170,10 +186,29 @@ void loop() {
 ************************************************************************************************/
 void ruuning_program() {
 	if (!commande_push || !commande_waiting){
-		return;
+		//return; <- A tester VS le fonctionnement du programme en auto
 	}
-
-	if (window_Menu){
+	
+	
+	if(window_Fail){
+		if(Y_MOIN){
+			resetIHM();
+			window_Finish = 1;
+		}
+		if(Y_PLUS){
+			if(window_Auto_run || window_Auto_paused || window_Auto_init)
+			{
+				MOTOR_RUN = 1 ;
+				window_Fail = 0;
+			}
+			else if (window_Manu_paused || window_Manual_init || window_Manual_run)
+			{
+				MOTOR_RUN = 1 ;
+				window_Fail = 0;
+			}
+		}
+	}
+	else if (window_Menu){
 		counter_steps = 0;
 		MOTOR_RUN = 0;
 		if(Y_MOIN){
@@ -230,27 +265,46 @@ void ruuning_program() {
 			resetIHM();
 			window_Menu = 1;
 		}
-		else if(Y_PLUS){
+		else if(Y_PLUS && measurement_target>0){
 			resetIHM();
 			window_Auto_run = 1;
 			MOTOR_RUN = 1;
 		}
-	//a poursuivre
 	}
   	else if(window_Auto_run){
+		if(Y_MOIN){
+			MOTOR_RUN = 0;
+			resetIHM();
+			window_Auto_paused = 1;
+		}
+		
+		/* Code pour le fonctionnement du moteur en fonction de la cible a mesurer*/
+		if(measurement_target<measurement-distance_deceleration_high)
+		{
 
-	//a poursuivre
+		}
+		else if(measurement_target<measurement-distance_deceleration_low)
+		{
+
+		}
+		else if(measurement_target >= measurement)
+		{
+			MOTOR_RUN = 0;
+			resetIHM();
+			window_Finish = 1;
+		}
 	}
 	else if(window_Auto_paused){
-
-	//a poursuivre
+		if(Y_MOIN){
+			resetIHM();
+			window_Finish = 1;
+		}
+		if(Y_PLUS){
+			resetIHM();
+			MOTOR_RUN = 1 ;
+			window_Auto_run = 1;
+		}
 	}
-	else if(window_Fail){
-
-	//a poursuivre
-	}
-
-	
 	commande_waiting = 0;
  
 }
@@ -368,44 +422,63 @@ void read_joystick() {
 
 	// ************************* Analyse de l'axe X *********************************
 
-    if (XValue < 400 && XValue > 10){ // joystick X - -> reduce motor speed
-		if (MOTOR_RUN && target_speed > 5 ){
-			target_speed = target_speed - 1;
-      	}
-    }
-    else if (XValue < 10){ // joystick X - -> Stop motor
-        if (MOTOR_RUN && target_speed > 5 ){
-			target_speed = target_speed - 1;
-      	}
-		else if (MOTOR_RUN && target_speed <= 5 ){
-          	MOTOR_RUN = 0;
-        }
-        else if ( actual_speed <= 0){
-			Y_MOIN = 0;
-			Y_PLUS = 0;
-			MOTOR_ENABLE = 0;
-			digitalWrite(PIN_ENABLE_DRIVER, HIGH);
-        }
-    }
-   	else if (XValue > 800){ // joystick X + -> Start motor or Speed
-      	if (!MOTOR_RUN){
-			target_speed = max_speed/2;
-			//MOTOR_RUN = 1;
-		}
-		if (MOTOR_RUN){
-			if (target_speed < max_speed){
-				target_speed += 1;
+    if (XValue < 400 && XValue > 10){ // joystick X - légée -> reduce motor speed ou longueur
+		if (!window_Auto_init)
+		{	
+
+			if (MOTOR_RUN && target_speed > 5 ){
+				target_speed = target_speed - 1;
 			}
-      	}
+		}
+
+    }
+    else if (XValue < 10){ // joystick X - -> Stop motor ou choisir la longueur
+        if (window_Auto_init)
+		{	
+			if(measurement_target >0)
+			measurement_target = target_speed - 1;
+			return;
+		}
+		else
+		{	
+			if (MOTOR_RUN && target_speed > 5 ){
+				target_speed = target_speed - 1;
+			}
+			else if (MOTOR_RUN && target_speed <= 5 ){
+				MOTOR_RUN = 0;
+			}
+			else if ( actual_speed <= 0){
+				Y_MOIN = 0;
+				Y_PLUS = 0;
+				MOTOR_ENABLE = 0;
+				digitalWrite(PIN_ENABLE_DRIVER, HIGH);
+			}
+		}
+    }
+   	else if (XValue > 800){ // joystick X + -> Start motor or Speed OR longueure
+      	        if (window_Auto_init)
+		{	
+			if(measurement_target >0)
+			measurement_target = target_speed + 1;
+			return;
+		}
+		else
+		{
+			if (!MOTOR_RUN){
+				target_speed = max_speed/2;
+				//MOTOR_RUN = 1;
+			}
+			if (MOTOR_RUN){
+				if (target_speed < max_speed){
+					target_speed += 1;
+				}
+			}
+		}
     }
 
-	// ************************* Analyse des Commandes ***************************
+	// ** Analyse des Commandes **
 	// Vérifier q'une commande est activé et mettre le programme en attente de 
 	// la prochaine commande.
-
-
-	
-
 	if (commande_waiting)
 	{
 		if (Y_PLUS || Y_MOIN)
