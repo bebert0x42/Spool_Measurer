@@ -51,14 +51,32 @@ A faire :
 
 	//****** Variable de de fenetre IHM******
 
+	//********| Spool Measurer |*********//
+	//********|<-Manual  Auto->|*********//
 	bool window_Menu 		= 1;
+	//********|M.   Lgt:  1.93m|*********//
+	//********|  Speed:0   rpm |*********//
 	bool window_Manual_run 	= 0;
+	//********|M.   Lgt:  1.93m|*********//
+	//********|<-Menu   Start->|*********//
 	bool window_Manual_init	= 0;
+	//********|     Paused     |*********//
+	//********|     23.01 m    |*********//
 	bool window_Manu_paused	= 0;
+	//********| Choose length! |*********//
+	//********| Lgt:  23.01 m  |*********//
 	bool window_Auto_init 	= 0;
+	//********| 002.22m/230.00m|*********//
+	//********|  Speed:0   rpm |*********//
 	bool window_Auto_run 	= 0;
+	//********|     Paused     |*********//
+	//********|     23.01 m    |*********//
 	bool window_Auto_paused	= 0;
+	//********|   Finished !   |*********//
+	//********|     23.01 m    |*********//
 	bool window_Finish 		= 0;
+	//********| System Failure |*********//
+	//********|<-Abort  Retry->|*********//
 	bool window_Fail 		= 0;
 
 
@@ -82,11 +100,11 @@ A faire :
 //******* Variable pour la fonction de mesure **********
 
 	//Compteur du nombre de steps de la roue codeuse
-	volatile unsigned int  counter_steps=0;
+	unsigned int  counter_steps=0;
 	//Mesure de la longueure filament à l'instant T (afficher sur l'IHM)
-	volatile float measurement = 0; 
+	float measurement = 0; 
 	//La mesure ciblé de longueure de filament
-	volatile float measurement_target = 1; 
+	float measurement_target = 1; 
 	
 	
 	//                           IIIII
@@ -106,7 +124,12 @@ A faire :
 	//Course de la bobine lors de la décélération de 35 RPM à 0
 	const float distance_deceleration_low = 20.0;
 
+//******* Variable pour la fonction de TimeOut **********
 
+	//Variable du dernier temps de mesure via millis()
+	unsigned long previous_time_measurement = 0;
+	//Temps en millisecond avant timeout (2s)
+	const unsigned long timeout = 2000;
 
 /*
  * =============================================================================================
@@ -156,38 +179,38 @@ void setup() {
 void loop() {
 
 	measurement =	counter_steps * perimeter_gear/encoder_hole;
-	ruuning_program();	// Boucle programme principal
+
 	read_joystick();	// Lectue Joystick
+	ruuning_program();	// Boucle programme principal
 	updateLCD();		// Mise a jours du LCD
 
-	if (MOTOR_RUN){
+	if (MOTOR_ENABLE)//Activation du moteur
+	{
+		digitalWrite(PIN_ENABLE_DRIVER, LOW);
+	}
+	else//Désactivation du moteur
+	{
+		digitalWrite(PIN_ENABLE_DRIVER, HIGH);
+	}
+
+	if (MOTOR_RUN)//Augmentation de la vitesse à la target
+	{
 		increase_speed();
 	}
-	else {
+	else//Diminution de la vitesse du moteur jusqu'à l'arret
+	{
 		decrease_speed();
 	}
 
+	//Vérification que nous ne somme pas en TimeOut (plus de mesure depuis X secondes)
+	if(previous_time_measurement + timeout > millis())
+	{
+		if (window_Auto_run || window_Manual_run)
+		{
+			window_Fail = 1;
+		}
+	}
 
-  /*// check which button was pressed
-  switch(button) {
-    
-    case btnUP:
-      increase_speed();
-      break;
-    case btnDOWN:
-      decrease_speed();
-      break;
-    case btnLEFT:
-      change_direction(BACKWARD);
-      break;
-    case btnRIGHT:
-      change_direction(FORWARD);
-      break;
-    case btnSELECT:
-      emergency_stop();
-      break;
-  }*/
-  
 }
 
 /********************************* Programme principal ****************************************
@@ -196,7 +219,7 @@ void loop() {
  * 
 ************************************************************************************************/
 void ruuning_program() {
-	if (!commande_push || !commande_waiting){
+	if (!commande_push || !commande_waiting ){// exclusion de windows fail ?
 		return; //<- A tester VS le fonctionnement du programme en auto
 	}
 	
@@ -397,6 +420,7 @@ void timerMotor() {
 void measure_filament() {
 	if (digitalRead(PIN_FOURCHE)){
 		counter_steps += 1;
+		previous_time_measurement = millis();
 	}
 }
 
@@ -448,6 +472,8 @@ void read_joystick() {
 		{	
 			if(measurement_target >0)
 			measurement_target = target_speed - 1;
+			commande_waiting = 1;
+			commande_push = 0;
 			return;
 		}
 		else
@@ -459,15 +485,12 @@ void read_joystick() {
 				MOTOR_RUN = 0;
 			}
 			else if ( actual_speed <= 0){
-				Y_MOIN = 0;
-				Y_PLUS = 0;
 				MOTOR_ENABLE = 0;
-				digitalWrite(PIN_ENABLE_DRIVER, HIGH);
 			}
 		}
     }
    	else if (XValue > 800){ // joystick X + -> Start motor or Speed OR longueure
-      	        if (window_Auto_init)
+      	if (window_Auto_init)
 		{	
 			if(measurement_target >0)
 			measurement_target = target_speed + 1;
@@ -477,7 +500,7 @@ void read_joystick() {
 		{
 			if (!MOTOR_RUN){
 				target_speed = max_speed/2;
-				//MOTOR_RUN = 1;
+				MOTOR_RUN = 1;
 			}
 			if (MOTOR_RUN){
 				if (target_speed < max_speed){
