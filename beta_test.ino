@@ -7,6 +7,12 @@ Liste des Bug et truc a mettre en place :
 A faire :
 
 - Calibration plus précise de la roues
+- Intégration du Servo moteur
+- Montage electrique
+- Création boitier electrique
+- Finir les fixations
+- réduire les tiges filetés
+
 
 Fait/traité :
 - Bug : Sur Auto_Init la modification de la valeure cible ne fonctionne pas bien (a cause des variables commande_push et commande_waiting)
