@@ -2,14 +2,38 @@
 /* Programme de test du materiel*/
 /*
 Liste des Bug et truc a mettre en place :
-- Sur l'ecran Manual Run, si on met la vitesse à 0 on ne peut plus la remonté directement sans passer par un autre menu
-- Sur Auto_Init la modification de la valeure cible ne fonctionne pas bien (a cause des variables commande_push et commande_waiting)
-- Sur Autu_run le joystick gauche vas sur Finished et non sur pause idem pour le droit.
-- Une fois la target atteint le programme continue (sur la fenetre Auto_Run)
+
 
 A faire :
-- commencer a codes les execptions et les mettres dans le ruuning_program ou loop
-£
+
+- Calibration plus précise de la roues
+
+Fait/traité :
+- Bug : Sur Auto_Init la modification de la valeure cible ne fonctionne pas bien (a cause des variables commande_push et commande_waiting)
+- Add : Ajout d'un fine tunning lors du choix de la valeurs de la target a mesurer
+- Add : Ajout d'une fonction reset target dans Window_Auto_init en clickan sur le joystick
+- Bug : Sur Autu_run le joystick gauche vas sur Finished et non sur pause idem pour le droit.
+- Bug : Sur l'ecran Manual Run, si on met la vitesse à 0 on ne peut plus la remonté directement sans passer par un autre menu
+- Bug : Reset du compteur Timout APRES la mise en pause en auto et manu
+- Bug : Sur tout les ecrans + et moins sont a désactivé sauf les ecrans de run
+- Add : Ajout des execptions timeout
+- Bug : Une fois la target atteint le programme continue (sur la fenetre Auto_Run)
+- Bug : Si la vitesse de rotation est à 0 le timeout déclenche quand même
+- Add : Passage en 1/8 de steps pour limiter le bruit moteur (configurable)
+- Test : Test a 24V, le couple est un peu meilleur mais pas un gain important
+- Test : L'alimentation 12V 2A suiffit (max 12V 1.2A utilisé)
+- Add : Modification de la rampe de vitesse et dimminution de la vitesse max
+- Bug : Lors de l'abort si la roue tourne le programme reprend (sur la fenetre Fail)
+- Bug : le moteur n'est pas coupé lors de l'abort
+- Bug : Affichage des RPM
+- Add : définition complete des vitesses
+- Add : Vérification de la limite d'améprage avec une alimentation plus forte 1.2 A max, 1A sur le driver
+- Add : vérification en condition réel
+- Add : Définition/calibration complete des distance_deceleration_high et distance_deceleration_low
+- Bug : Apres une mesure, l'ancienne vitesse est en mémoire
+- Add : Click sur le joystick sur les ecran window Manu reset le compteur
+
+
 */
 
 #include <TimerOne.h>
@@ -38,8 +62,11 @@ A faire :
 	bool Y_PLUS 			= 0;
 	bool Y_MOIN 			= 0;
 	bool CLICK 				= 0;
-	bool commande_waiting	= 1;// Variable pour attendre que le joystick se remete en 0
-	bool commande_push		= 0;// Variable pour push une commande joystick
+	// Variable pour attendre que le joystick se remete en 0
+	bool commande_waiting	= 1;
+	// Variable pour push une commande joystick
+	bool commande_push		= 0;
+	int debug_var			= 0;// variable de debugage
 
 	//****** Variable de statu ******
 
@@ -92,9 +119,9 @@ A faire :
 
 //*********** Parametre de vitesse du moteur ***************
 
-	const int speed_ticks[] = {-1, 400,375,350,325,300,275,250,225,200,175,150,125,110,100,90,85,80,75,70,65,60,55,50};
+	const int speed_ticks[] = {-1, 600,575,550,525,500,475,450,425,400,375,350,325,300,275,240,200,170,135,120,110,95,85,75};
 	size_t max_speed = (sizeof(speed_ticks) / sizeof(speed_ticks[0])) -1 ; // nombre de variable dans le tableau
-
+	const int microsteps = 8; // 1 Full step, 2 Half, 4 1/4 de step, 8 1/8 de steps
 
 
 //******* Variable pour la fonction de mesure **********
@@ -104,7 +131,7 @@ A faire :
 	//Mesure de la longueure filament à l'instant T (afficher sur l'IHM)
 	float measurement = 0; 
 	//La mesure ciblé de longueure de filament
-	float measurement_target = 1; 
+	float measurement_target = 0; 
 	
 	
 	//                           IIIII
@@ -119,17 +146,19 @@ A faire :
 	const float perimeter_gear = 0.0339;
 	//nombre de fenetre sur la roue codeuse
 	const int encoder_hole = 2;
-	//Course de la bobine lors de la décélération de 75 RPM à 0
-	const float distance_deceleration_high = 40.0;
+	//Course de la bobine lors de la décélération de 60 RPM à 0
+	const float distance_deceleration_high = 0.35;
 	//Course de la bobine lors de la décélération de 35 RPM à 0
-	const float distance_deceleration_low = 20.0;
+	//const float distance_deceleration_low = 0.15;
 
 //******* Variable pour la fonction de TimeOut **********
 
 	//Variable du dernier temps de mesure via millis()
 	unsigned long previous_time_measurement = 0;
-	//Temps en millisecond avant timeout (2s)
-	const unsigned long timeout = 2000;
+	//Temps en millisecond avant timeout (0.500s)
+	const unsigned long timeout = 1000;
+	//Variable du dernier temps de mesure via millis() + Timeout
+	unsigned long check_time_measurement = 0;
 
 /*
  * =============================================================================================
@@ -167,8 +196,9 @@ void setup() {
   	pinMode(PIN_DIR, OUTPUT);
 	digitalWrite(PIN_DIR, actual_direction);
 
-  	// Pin Fourche ??????????????????????????????????????????????????????
+  	// Pin Fourche
   	pinMode(PIN_FOURCHE, INPUT_PULLUP);
+	pinMode(PIN_CLICK,INPUT_PULLUP);
 
 }
 /*
@@ -183,8 +213,9 @@ void loop() {
 	read_joystick();	// Lectue Joystick
 	ruuning_program();	// Boucle programme principal
 	updateLCD();		// Mise a jours du LCD
+	check_Target();
 
-	if (MOTOR_ENABLE)//Activation du moteur
+	if (MOTOR_ENABLE && !window_Fail)//Activation du moteur
 	{
 		digitalWrite(PIN_ENABLE_DRIVER, LOW);
 	}
@@ -193,7 +224,7 @@ void loop() {
 		digitalWrite(PIN_ENABLE_DRIVER, HIGH);
 	}
 
-	if (MOTOR_RUN)//Augmentation de la vitesse à la target
+	if (MOTOR_RUN && !window_Fail)//Augmentation de la vitesse à la target
 	{
 		increase_speed();
 	}
@@ -203,13 +234,22 @@ void loop() {
 	}
 
 	//Vérification que nous ne somme pas en TimeOut (plus de mesure depuis X secondes)
-	if(previous_time_measurement + timeout > millis())
+	check_time_measurement = previous_time_measurement + timeout;
+
+	if(actual_speed>0 && check_time_measurement < millis())
 	{
 		if (window_Auto_run || window_Manual_run)
 		{
 			window_Fail = 1;
+			emergency_stop();
+			
 		}
 	}
+	else if (actual_speed<=0 && check_time_measurement < millis())
+	{
+		previous_time_measurement = millis();
+	}
+	
 
 }
 
@@ -225,11 +265,14 @@ void ruuning_program() {
 	
 	
 	if(window_Fail){
-		if(Y_MOIN){
+		if(Y_MOIN){//abort du process et retour au menu principal
 			resetIHM();
+			MOTOR_RUN = 0 ;
+			MOTOR_ENABLE = 0 ;
 			window_Finish = 1;
 		}
-		if(Y_PLUS){
+		if(Y_PLUS){//Retry avec reset du compteur timeout
+			previous_time_measurement = millis();
 			if(window_Auto_run || window_Auto_paused || window_Auto_init)
 			{
 				MOTOR_RUN = 1 ;
@@ -248,10 +291,12 @@ void ruuning_program() {
 		if(Y_MOIN){
 			resetIHM();
 			window_Manual_init = 1;
+			target_speed = max_speed/2;
 		}
 		else if(Y_PLUS){
 			resetIHM();
 			window_Auto_init = 1;
+			target_speed = max_speed/2;
 		}
 	}
 	else if(window_Manual_init)
@@ -264,6 +309,7 @@ void ruuning_program() {
 			resetIHM();
 			window_Manual_run = 1;
 			MOTOR_RUN = 1;
+			previous_time_measurement = millis();
 			
 		}
 	}
@@ -285,6 +331,7 @@ void ruuning_program() {
 			resetIHM();
 			MOTOR_RUN = 1 ;
 			window_Manual_run = 1;
+			previous_time_measurement = millis();
 		}
 	}
 	else if(window_Finish)
@@ -292,6 +339,8 @@ void ruuning_program() {
 		if(Y_MOIN || Y_PLUS){
 			resetIHM();
 			window_Menu = 1;
+			MOTOR_RUN = 0;
+			MOTOR_ENABLE = 0;
 		}
 	}
 	else if(window_Auto_init){
@@ -303,6 +352,7 @@ void ruuning_program() {
 			resetIHM();
 			window_Auto_run = 1;
 			MOTOR_RUN = 1;
+			previous_time_measurement = millis();
 		}
 	}
   	else if(window_Auto_run){
@@ -311,22 +361,7 @@ void ruuning_program() {
 			resetIHM();
 			window_Auto_paused = 1;
 		}
-		
-		/* Code pour le fonctionnement du moteur en fonction de la cible a mesurer*/
-		if(measurement_target<measurement-distance_deceleration_high)
-		{
-
-		}
-		else if(measurement_target<measurement-distance_deceleration_low)
-		{
-
-		}
-		else if(measurement_target >= measurement)
-		{
-			MOTOR_RUN = 0;
-			resetIHM();
-			window_Finish = 1;
-		}
+	
 	}
 	else if(window_Auto_paused){
 		if(Y_MOIN){
@@ -337,11 +372,40 @@ void ruuning_program() {
 			resetIHM();
 			MOTOR_RUN = 1 ;
 			window_Auto_run = 1;
+			previous_time_measurement = millis();
 		}
 	}
 	commande_waiting = 0;
  
 }
+
+/********************************* Fonction de check de la mesure VS Targe *********************
+ * 
+ * - Permet de vérifier si la valeur measurement est proche de la target pour diminuer la vitesse
+ * du moteur
+ * - Passe window_Finish à 1 si la target est ok et coupe le moteur
+ * 
+************************************************************************************************/
+void check_Target() 
+{
+	
+	if(measurement_target>0 && window_Auto_run)
+	{
+			/* Code pour le fonctionnement du moteur en fonction de la cible a mesurer*/
+			if(measurement >= measurement_target)
+			{
+				MOTOR_RUN = 0;
+				resetIHM();
+				window_Finish = 1;
+			}
+			else if(measurement+distance_deceleration_high>=measurement_target)
+			{
+				target_speed = 1;
+			}
+	}
+}
+
+
 /********************************* Fonction Diminution de la vitesse Moteur *********************
  * 
  * - Augmentation de la vitesse moteur en fonction des valeurs du tableau speed_ticks
@@ -352,12 +416,12 @@ void increase_speed() {
   if(actual_speed < target_speed) {
     actual_speed += 1;
     tick_count = 0;
-    ticks = speed_ticks[actual_speed];
+    ticks = speed_ticks[actual_speed]/microsteps;
   }
   else if (actual_speed > target_speed){
 	actual_speed -= 1;
 	tick_count = 0;
-	ticks = speed_ticks[actual_speed];
+	ticks = speed_ticks[actual_speed]/microsteps;
   }
 }
 
@@ -371,7 +435,7 @@ void decrease_speed() {
   if(actual_speed > 0) {
     actual_speed -= 1;
     tick_count = 0;
-    ticks = speed_ticks[actual_speed];
+    ticks = speed_ticks[actual_speed]/microsteps;
   } 
 }
 
@@ -383,7 +447,7 @@ void decrease_speed() {
 void emergency_stop() {
   actual_speed = 0;
   tick_count = 0;
-  ticks = speed_ticks[actual_speed / 5];
+  //ticks = speed_ticks[actual_speed / 5]/microsteps;
 }
 
 /********************************* Fonction TimerMotor *****************************************
@@ -437,17 +501,18 @@ void read_joystick() {
 
 	int XValue = analogRead(PIN_X);     // Read the analog value from The X-axis from the joystick
 	int YValue = analogRead(PIN_Y);     // Read the analog value from The Y-axis from the joystick
-
+	bool clickJoystick = !digitalRead(PIN_CLICK); // Read the digital value from Joystick Click
+	
 	// ************************* Analyse de l'axe Y *********************************
 
   	if (!Y_PLUS && !Y_MOIN){
 		if (YValue < 10){ // joystick Y - -> 
-			Y_MOIN = 1;
-			Y_PLUS = 0;
-		}
-		else if (YValue > 800 ){ // joystick Y +  -> 
 			Y_MOIN = 0;
 			Y_PLUS = 1;
+		}
+		else if (YValue > 800 ){ // joystick Y +  -> 
+			Y_MOIN = 1;
+			Y_PLUS = 0;
 		}
 	}
 	else if (YValue < 800 && YValue > 50){        // Y en home position      
@@ -456,27 +521,39 @@ void read_joystick() {
 	} 
 
 	// ************************* Analyse de l'axe X *********************************
-
-    if (XValue < 400 && XValue > 10){ // joystick X - légée -> reduce motor speed ou longueur
-		if (!window_Auto_init)
+	
+    if (XValue > 600 && XValue < 950)// joystick X - légée -> reduce motor speed ou longueur
+	{ 
+		if (window_Auto_run || window_Manual_run)
 		{	
-
-			if (MOTOR_RUN && target_speed > 5 ){
+			if (MOTOR_RUN && target_speed > 5 )
+			{
 				target_speed = target_speed - 1;
 			}
 		}
+		else if (window_Auto_init)
+		{	
+			if(measurement_target > 0)
+			{
+				
+				measurement_target = measurement_target-0.01;
+				return;
+			}
 
-    }
-    else if (XValue < 10){ // joystick X - -> Stop motor ou choisir la longueur
+
+    	}
+	}
+    else if (XValue > 800){ // joystick X - -> Stop motor ou choisir la longueur
         if (window_Auto_init)
 		{	
-			if(measurement_target >0)
-			measurement_target = target_speed - 1;
-			commande_waiting = 1;
-			commande_push = 0;
-			return;
+			if(measurement_target >= 1)
+			{
+				measurement_target = measurement_target - 1;
+				return;
+			}
+
 		}
-		else
+		else if (window_Auto_run || window_Manual_run)
 		{	
 			if (MOTOR_RUN && target_speed > 5 ){
 				target_speed = target_speed - 1;
@@ -489,14 +566,28 @@ void read_joystick() {
 			}
 		}
     }
-   	else if (XValue > 800){ // joystick X + -> Start motor or Speed OR longueure
+	else if (XValue < 450 && XValue > 2)// joystick X + légée ->  longueur + 0.1
+	{ 
+		if (window_Auto_init)
+		{	
+			if(measurement_target > 0)
+			{
+				measurement_target = measurement_target+0.01;
+				return;
+			}
+    	}
+	}
+   	else if (XValue < 2){ // joystick X + -> Start motor or Speed OR longueure
       	if (window_Auto_init)
 		{	
-			if(measurement_target >0)
-			measurement_target = target_speed + 1;
-			return;
+			if(measurement_target < 400)
+			{
+				measurement_target = measurement_target + 1;
+				return;
+			}
+			
 		}
-		else
+		else if (window_Auto_run || window_Manual_run)
 		{
 			if (!MOTOR_RUN){
 				target_speed = max_speed/2;
@@ -509,6 +600,15 @@ void read_joystick() {
 			}
 		}
     }
+	else if (clickJoystick)// Si on click sur le joystick
+	{
+		if (window_Auto_init || window_Manual_run || window_Manual_init)// reset de la target sur cette page
+		{	
+			measurement_target = 0;
+			counter_steps = 0;
+			return;
+		}
+	}
 
 	// ** Analyse des Commandes **
 	// Vérifier q'une commande est activé et mettre le programme en attente de 
@@ -547,9 +647,8 @@ void read_joystick() {
  * 
 ************************************************************************************************/
 void updateLCD() {
-	lcd.setCursor(0,0);
-	lcd.print(commande_push);
-	lcd.print(commande_waiting);
+	//lcd.setCursor(0,0);
+	//lcd.print(debug_var);
 
 	if(window_Fail)
 	{
@@ -574,33 +673,32 @@ void updateLCD() {
 		//********|M.   Lgt:  1.93m|*********//
 		//********|  Speed:0   rpm |*********//
 		lcd.setCursor(0, 0);
-		lcd.print("M.   Lgt:");
+		lcd.print("M. Lgt : ");
 		lcd.setCursor(9, 0);
 		lcd.print("      ");
 		lcd.setCursor(9, 0);
 		lcd.print(measurement);
-		lcd.setCursor(15, 0);
-		lcd.print("m");
+		//lcd.setCursor(15, 0);
+		lcd.print("m            ");
 		lcd.setCursor(0, 1);
-		lcd.print("  Speed:");
-		lcd.setCursor(9, 1);
-		lcd.print("    ");
-		lcd.setCursor(9, 1);
-		lcd.print(actual_speed);
-		lcd.setCursor(12, 1);
-		lcd.print("rpm ");
+		lcd.print("Speed : ");
+		lcd.setCursor(8, 1);
+		lcd.print("         ");
+		lcd.setCursor(8, 1);
+		lcd.print(actual_speed*2.7);
+		//lcd.setCursor(13, 1);
+		lcd.print("rpm    ");
 	}
 	else if (window_Manual_init)
 	{
 		//********|M.   Lgt:  1.93m|*********//
 		//********|<-Menu   Start->|*********//
 		lcd.setCursor(0, 0);
-		lcd.print("M.   Lgt:");
+		lcd.print("M. Lgt : ");
 		lcd.setCursor(9, 0);
-		lcd.print("      ");
+		lcd.print("         ");
 		lcd.setCursor(9, 0);
 		lcd.print(measurement);
-		lcd.setCursor(15, 0);
 		lcd.print("m");
 		lcd.setCursor(0, 1);
 		lcd.print("<-Menu   Start->");
@@ -644,40 +742,63 @@ void updateLCD() {
 		lcd.print("  Speed:");
 		lcd.setCursor(9, 1);
 		lcd.print("    ");
-		lcd.setCursor(9, 1);
-		lcd.print(actual_speed);
-		lcd.setCursor(12, 1);
+		lcd.setCursor(8, 1);
+		lcd.print(actual_speed*2.7);
+		lcd.setCursor(13, 1);
 		lcd.print("rpm ");
 	}
-	else if (window_Auto_paused || window_Manu_paused)
+	else if (window_Auto_paused)
 	{
 		//********|     Paused     |*********//
 		//********|     23.01 m    |*********//
 		lcd.setCursor(0, 0);
-		lcd.print("     PAUSED     ");
-		lcd.setCursor(0, 1);
-		lcd.print("    ");
-		lcd.setCursor(4, 1);
+		lcd.print(" ");
+		lcd.setCursor(1, 0);
 		lcd.print("      ");
-		lcd.setCursor(4, 1);
+		lcd.setCursor(1, 0);
 		lcd.print(measurement);
-		lcd.setCursor(9, 1);
-		lcd.print(" m    ");
+		lcd.setCursor(7, 0);
+		lcd.print("m/");
+		lcd.setCursor(9, 0);
+		lcd.print("      ");
+		lcd.setCursor(9, 0);
+		lcd.print(measurement_target);
+		lcd.setCursor(15, 0);
+		lcd.print("m");
+		
+		lcd.setCursor(0, 1);
+		lcd.print("     PAUSED     ");
+
+
+	}
+	else if (window_Manu_paused)
+	{
+		//********|     Paused     |*********//
+		//********|     23.01 m    |*********//
+		lcd.setCursor(0, 0);
+		lcd.print("M. Lgt : ");
+		lcd.setCursor(9, 0);
+		lcd.print("      ");
+		lcd.setCursor(9, 0);
+		lcd.print(measurement);
+		
+		lcd.setCursor(0, 1);
+		lcd.print("     PAUSED     ");
+
 	}
 	else if (window_Finish)
 	{
 		//********|   Finished !   |*********//
 		//********|     23.01 m    |*********//
 		lcd.setCursor(0, 0);
-		lcd.print("   Finished !   ");
+		lcd.print("    Finished !   ");
 		lcd.setCursor(0, 1);
 		lcd.print("    ");
-		lcd.setCursor(4, 1);
+		lcd.setCursor(5, 1);
 		lcd.print("      ");
 		lcd.setCursor(4, 1);
 		lcd.print(measurement);
-		lcd.setCursor(9, 1);
-		lcd.print(" m    ");
+		lcd.print("m         ");
 	}
 	else
 	{
@@ -688,16 +809,6 @@ void updateLCD() {
 		lcd.setCursor(0, 1);
 		lcd.print("<-Abort  Retry->");
 	}
-
-	/*lcd.setCursor(0,0);
-	lcd.print("Speed: ");
-	lcd.print(actual_speed);
-	lcd.print("RPM ");
-
-	lcd.setCursor(0,1);
-	lcd.print(counter_steps);
-	lcd.print("   ");*/
-	
 } 
 
 /********************************* Reset ecran IHM **************************************************
