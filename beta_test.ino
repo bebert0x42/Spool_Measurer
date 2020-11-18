@@ -2,6 +2,8 @@
 /* Programme de test du materiel*/
 /*
 Liste des Bug et truc a mettre en place :
+- BUG #1 Mesure non fiable, soit mettre un condensateur 100nf soit modifier le code pour une vérification de la lecture
+
 
 
 A faire :
