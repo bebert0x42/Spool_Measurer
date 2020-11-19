@@ -1,6 +1,6 @@
 
 /*
-  SpoolMeasurer.ino - Program for check size of spool - Version 0.1
+  SpoolMeasurer.ino - Program for check size of spool - Version 1.0
   Copyright (c) 2020 Bertrand BOUVIER.  All right reserved.
 
   This Program is free software; you can redistribute it and/or
