@@ -631,7 +631,7 @@ void servoGuide_Running()
 			
 			servo_guide.write(position_servo);
 			
-			debug_var = position_servo;
+			//debug_var = position_servo;
 		}
 	}
 	else
@@ -829,8 +829,8 @@ void read_joystick()
 ************************************************************************************************/
 void updateLCD()
 {
-	lcd.setCursor(0,0);
-	lcd.print(debug_var);
+	//lcd.setCursor(0,0);
+	//lcd.print(debug_var);
 
 	if ((window_Time + window_Tempo) < millis())
 	{
