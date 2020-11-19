@@ -103,6 +103,10 @@ Fait/traité :
 	//Variable des bouton joystick
 	bool X_PLUS = 0;
 	bool X_MOIN = 0;
+	//Origine centrale de la commande joystick X
+	int XValue_origine;				  // Read the analog value from The X-axis from the joystick
+	//Origine centrale de la commande joystick Y
+	int YValue_origine;	
 	bool Y_PLUS = 0;
 	bool Y_MOIN = 0;
 	bool CLICK = 0;
@@ -286,6 +290,8 @@ void setup()
 	position_servo = servo_guide.read(); // récupération de la position du servo moteur
 	servo_guide.detach(); // désactivation du couple
 
+	XValue_origine = analogRead(PIN_X);				  // Read the analog value from The X-axis from the joystick
+	YValue_origine = analogRead(PIN_Y);	
 }
 /*
  * =============================================================================================
@@ -701,7 +707,7 @@ void read_joystick()
 	{
 		joystick_Time = millis();
 
-		if (XValue > 600 && XValue < 900) // joystick X - légée -> reduce motor speed ou longueur
+		if (XValue > (XValue_origine+20) && XValue < (XValue_origine+350)) // joystick X - légée -> reduce motor speed ou longueur
 		{
 			if (window_Auto_run || window_Manual_run)
 			{
@@ -720,7 +726,7 @@ void read_joystick()
 				}
 			}
 		}
-		else if (XValue > 900)
+		else if (XValue > (XValue_origine+350))
 		{ // joystick X - -> Stop motor ou choisir la longueur
 			if (window_Auto_init)
 			{
@@ -746,7 +752,7 @@ void read_joystick()
 				}
 			}
 		}
-		else if (XValue < 450 && XValue > 2) // joystick X + légée ->  longueur + 0.1
+		else if (XValue < (XValue_origine-20) && XValue > 2) // joystick X + légée ->  longueur + 0.1
 		{
 			if (window_Auto_init)
 			{
@@ -783,7 +789,7 @@ void read_joystick()
 				}
 			}
 		}
-		else if (clickJoystick) // Si on click sur le joystick
+		if (clickJoystick) // Si on click sur le joystick
 		{
 			if (window_Auto_init || window_Manual_run || window_Manual_init) // reset de la target sur cette page
 			{
@@ -829,9 +835,12 @@ void read_joystick()
 ************************************************************************************************/
 void updateLCD()
 {
-	//lcd.setCursor(0,0);
-	//lcd.print(debug_var);
-
+	if (debug_var)
+	{
+		lcd.setCursor(0,0);
+		lcd.print(debug_var);
+	}
+	
 	if ((window_Time + window_Tempo) < millis())
 	{
 		window_Time = millis();
