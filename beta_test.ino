@@ -1,23 +1,42 @@
 
-
-
-
-/* Beta test code pour projet PIC IMT11 SpoolMeasurer */
-/* Programme de test du materiel*/
 /*
-Liste des Bug et truc a mettre en place :
-- Bug : quand on fait trop vite back back back le moteur ne se coupe pas
+  SpoolMeasurer.ino - Program for check size of spool - Version 0.1
+  Copyright (c) 2020 Bertrand BOUVIER.  All right reserved.
 
+  This Program is free software; you can redistribute it and/or
+  modify it under the terms of the GNU Lesser General Public
+  License as published by the Free Software Foundation; either
+  version 2.1 of the License, or (at your option) any later version.
+
+  This library is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+  Lesser General Public License for more details.
+
+  You should have received a copy of the GNU Lesser General Public
+  License along with this library; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+*/
+
+/* Release Candidate code pour projet PIC IMT11 SpoolMeasurer 						*/
+/* Code : @BeBerT 																	*/
+/* En charge du projet : @SebTr @DamCr @LudoGi @BeBerT 								*/
+/* Library externe utilisé :  ServoTime2 : https://github.com/nabontra/ServoTimer2 	*/
+/* Lien du projet Onshape : https://cad.onshape.com/documents/6e38f85efcf624cf0dfd1f8a/w/b923c5393b2d579b6667d7b0/e/eeb6654811e7cc9f2c1ab6ce	*/
+
+
+
+/*
+
+Liste des Bug :
+- 
 
 A faire :
+- Bug : Changer le design du support du servo pour contraindre le filament
+- Ajout : Création boitier electrique
+- Bug : Faire un balais de préinage pour la bobine In
 
-- Calibration plus précise de la roues ? (actuelement 260cm réél mesuré 260+/- 3cm)
-- reduire le frame rate du LCD (avec millis())
-- Intégration du Servo moteur
-- Montage electrique
-- Création boitier electrique
-- Finir les fixations
-- réduire les tiges filetés
+
 
 
 Fait/traité :
@@ -46,7 +65,15 @@ Fait/traité :
 - Add : Click sur le joystick sur les ecran window Manu reset le compteur
 - BUG #1 Mesure non fiable, soit mettre un condensateur 100nf soit modifier le code pour une vérification de la lecture
 		Update de la fonction measurement
-
+- Ajout : Réduire taille des tiges fileté
+- Ajout : Finir les fixations
+- Ajout : Intégration du Servo moteur
+- Ajout : Reduire le frame rate du LCD à 200ms (avec millis())
+- Bug : X moins ne fonctionne plus --> Ajustement de la valeur XMoins
+- Bug : quand on fait trop vite back back back le moteur ne se coupe pas
+- Ajout : Calibration plus précise de la roues ? (Sur 10 m de filament mesuré, variation de 1cm en moyenne)
+- Bug : Réduire la vitesse du servo moteur --> Ajout d'une constante de vitesse
+- Ajout : Activer le servo QUE pendant la rotation
 
 */
 
@@ -83,6 +110,10 @@ Fait/traité :
 	bool commande_waiting = 1;
 	// Variable pour push une commande joystick
 	bool commande_push = 0;
+	//Frame Rate de la mise a jours de commande en X
+	unsigned int joystick_Tempo = 200;
+	//Variable de temps en millis pour la tempo de la commande en X
+	unsigned long joystick_Time = 0;
 	int debug_var = 0; // variable de debugage
 
 //****** Variable de statu ******
@@ -122,6 +153,11 @@ Fait/traité :
 	//********|<-Abort  Retry->|*********//
 	bool window_Fail = 0;
 
+	//Frame Rate de la mise a jours de l'affichage en millis
+	unsigned int window_Tempo = 0;
+	//Variable de temps en millis pour la tempo de l'affichage
+	unsigned long window_Time = 0;
+
 //******* Variable pour le fonctinnement moteur **********
 	int actual_speed = 1;
 	int actual_direction;
@@ -156,11 +192,13 @@ Fait/traité :
 	//                            II
 
 	//périmetre de la roue denté de mesure en mm
-	const float perimeter_gear = 0.0339;
+	const float perimeter_gear = 0.0343581;
+	// avec une roue de 0.0339,   6m mesurer = 5.92m
+
 	//nombre de fenetre sur la roue codeuse
 	const int encoder_hole = 2;
 	//Course de la bobine lors de la décélération de 60 RPM à 0
-	const float distance_deceleration = 0.50;
+	const float distance_deceleration = 0.60;
 	//Variable de temporisation pour éviter les faux signaux de la fourche optique
 	static volatile unsigned long debounce = 0;
 	//Temps de latence de la fourche optique pour s'assurer d'une bonne mesure
@@ -183,18 +221,22 @@ Fait/traité :
 	const int position_middle = 1500;
 	// Course du servo moteur en microseconde pendant le fonctionnement
 	const int position_variation = 600;
+	// vitesse du guide en fonction de la vitesse du moteur
+	const int position_speed = 10;
 	// Position de départ du servo moteur en microseconde  pendant le fonctionnement
 	const int position_start = position_middle - position_variation / 2;
 	// Position de fin du servo moteur en microseconde pendant le fonctionnement
 	const int position_end = position_middle + position_variation / 2;
 	// Position actuel du servo moteur en microseconde (position de départ au démarage)
-	int position_servo = position_start;
+	int position_servo = 0;
 	// Dernier temps en millis() que le servo moteur a bougé
 	unsigned long position_tempo = 0;
 	// Temps entre chaque mouvement d'une microseconde du servo moteur (en fonction de la vitesse du moteur)
 	unsigned int position_running_time = speed_ticks[actual_speed];
 	// Sens de direction du servo moteur
 	bool direction_servo = 0;
+	// Boolean de mémoire pour savoir si le servo doit recommencer à ça valeur présédente
+	bool start_servo = 1;
 
 /*
  * =============================================================================================
@@ -239,7 +281,11 @@ void setup()
 
 	//init du servo Moteur Guide
 	servo_guide.attach(PIN_SERVO); // attaches the servo signal pin
-	servo_guide.write(position_start);
+	delay(200);
+	servo_guide.write(position_middle);// positionnement au milieu
+	position_servo = servo_guide.read(); // récupération de la position du servo moteur
+	servo_guide.detach(); // désactivation du couple
+
 }
 /*
  * =============================================================================================
@@ -248,7 +294,6 @@ void setup()
 */
 void loop()
 {
-
 	measurement = counter_steps * perimeter_gear / encoder_hole;
 
 	read_joystick();   					// Lectue Joystick
@@ -289,6 +334,12 @@ void loop()
 	else if (actual_speed <= 0 && check_time_measurement < millis())
 	{
 		previous_time_measurement = millis();
+	}
+
+	if (window_Menu)//pour corriger le bug
+	{
+		MOTOR_RUN = 0;
+		MOTOR_ENABLE = 0;
 	}
 }
 
@@ -548,6 +599,14 @@ void servoGuide_Running()
 {
 	if (MOTOR_RUN && MOTOR_ENABLE)
 	{
+		servo_guide.attach(PIN_SERVO); // attaches the servo signal pin
+
+		if (start_servo)
+		{
+			position_servo = servo_guide.read(); // récupération de la position du servo moteur
+			start_servo = 0;
+		}
+		
 		position_running_time = speed_ticks[actual_speed] * 2 ;
 
 		if ((position_tempo + position_running_time) < millis())
@@ -555,7 +614,7 @@ void servoGuide_Running()
 			position_tempo = millis();
 			if (!direction_servo && position_servo < position_end)
 			{
-				position_servo = position_servo + 20;
+				position_servo = position_servo + position_speed;
 			}
 			else if (!direction_servo && position_servo >= position_end)
 			{
@@ -563,7 +622,7 @@ void servoGuide_Running()
 			}
 			else if (direction_servo && position_servo > position_start)
 			{
-				position_servo = position_servo - 20;
+				position_servo = position_servo - position_speed;
 			}
 			else if (direction_servo && position_servo <= position_start)
 			{
@@ -571,8 +630,16 @@ void servoGuide_Running()
 			}
 			
 			servo_guide.write(position_servo);
+			
+			debug_var = position_servo;
 		}
 	}
+	else
+	{
+		servo_guide.detach(); // coupe le couple du servo moteur guide
+		start_servo = 1;
+	}
+	
 }
 
 /********************************* Fonction de compteur de tour par interupt *******************
@@ -606,6 +673,7 @@ void read_joystick()
 	int XValue = analogRead(PIN_X);				  // Read the analog value from The X-axis from the joystick
 	int YValue = analogRead(PIN_Y);				  // Read the analog value from The Y-axis from the joystick
 	bool clickJoystick = !digitalRead(PIN_CLICK); // Read the digital value from Joystick Click
+	//debug_var =	XValue; //pour debug
 
 	// ************************* Analyse de l'axe Y *********************************
 
@@ -629,99 +697,102 @@ void read_joystick()
 	}
 
 	// ************************* Analyse de l'axe X *********************************
-
-	if (XValue > 600 && XValue < 950) // joystick X - légée -> reduce motor speed ou longueur
+	if ((joystick_Time + joystick_Tempo) < millis())
 	{
-		if (window_Auto_run || window_Manual_run)
-		{
-			if (MOTOR_RUN && target_speed > 5)
-			{
-				target_speed = target_speed - 1;
-			}
-		}
-		else if (window_Auto_init)
-		{
-			if (measurement_target > 0)
-			{
+		joystick_Time = millis();
 
-				measurement_target = measurement_target - 0.01;
-				return;
-			}
-		}
-	}
-	else if (XValue > 800)
-	{ // joystick X - -> Stop motor ou choisir la longueur
-		if (window_Auto_init)
+		if (XValue > 600 && XValue < 900) // joystick X - légée -> reduce motor speed ou longueur
 		{
-			if (measurement_target >= 1)
+			if (window_Auto_run || window_Manual_run)
 			{
-				measurement_target = measurement_target - 1;
-				return;
-			}
-		}
-		else if (window_Auto_run || window_Manual_run)
-		{
-			if (MOTOR_RUN && target_speed > 5)
-			{
-				target_speed = target_speed - 1;
-			}
-			else if (MOTOR_RUN && target_speed <= 5)
-			{
-				MOTOR_RUN = 0;
-			}
-			else if (actual_speed <= 0)
-			{
-				MOTOR_ENABLE = 0;
-			}
-		}
-	}
-	else if (XValue < 450 && XValue > 2) // joystick X + légée ->  longueur + 0.1
-	{
-		if (window_Auto_init)
-		{
-			if (measurement_target > 0)
-			{
-				measurement_target = measurement_target + 0.01;
-				return;
-			}
-		}
-	}
-	else if (XValue < 2)
-	{ // joystick X + -> Start motor or Speed OR longueure
-		if (window_Auto_init)
-		{
-			if (measurement_target < 400)
-			{
-				measurement_target = measurement_target + 1;
-				return;
-			}
-		}
-		else if (window_Auto_run || window_Manual_run)
-		{
-			if (!MOTOR_RUN)
-			{
-				target_speed = max_speed / 2;
-				MOTOR_RUN = 1;
-			}
-			if (MOTOR_RUN)
-			{
-				if (target_speed < max_speed)
+				if (MOTOR_RUN && target_speed > 5)
 				{
-					target_speed += 1;
+					target_speed = target_speed - 1;
+				}
+			}
+			else if (window_Auto_init)
+			{
+				if (measurement_target > 0)
+				{
+
+					measurement_target = measurement_target - 0.01;
+					return;
 				}
 			}
 		}
-	}
-	else if (clickJoystick) // Si on click sur le joystick
-	{
-		if (window_Auto_init || window_Manual_run || window_Manual_init) // reset de la target sur cette page
+		else if (XValue > 900)
+		{ // joystick X - -> Stop motor ou choisir la longueur
+			if (window_Auto_init)
+			{
+				if (measurement_target >= 1)
+				{
+					measurement_target = measurement_target - 1;
+					return;
+				}
+			}
+			else if (window_Auto_run || window_Manual_run)
+			{
+				if (MOTOR_RUN && target_speed > 5)
+				{
+					target_speed = target_speed - 1;
+				}
+				else if (MOTOR_RUN && target_speed <= 5)
+				{
+					MOTOR_RUN = 0;
+				}
+				else if (actual_speed <= 0)
+				{
+					MOTOR_ENABLE = 0;
+				}
+			}
+		}
+		else if (XValue < 450 && XValue > 2) // joystick X + légée ->  longueur + 0.1
 		{
-			measurement_target = 0;
-			counter_steps = 0;
-			return;
+			if (window_Auto_init)
+			{
+				if (measurement_target > 0)
+				{
+					measurement_target = measurement_target + 0.01;
+					return;
+				}
+			}
+		}
+		else if (XValue < 2)
+		{ // joystick X + -> Start motor or Speed OR longueure
+			if (window_Auto_init)
+			{
+				if (measurement_target < 400)
+				{
+					measurement_target = measurement_target + 1;
+					return;
+				}
+			}
+			else if (window_Auto_run || window_Manual_run)
+			{
+				if (!MOTOR_RUN)
+				{
+					target_speed = max_speed / 2;
+					MOTOR_RUN = 1;
+				}
+				if (MOTOR_RUN)
+				{
+					if (target_speed < max_speed)
+					{
+						target_speed += 1;
+					}
+				}
+			}
+		}
+		else if (clickJoystick) // Si on click sur le joystick
+		{
+			if (window_Auto_init || window_Manual_run || window_Manual_init) // reset de la target sur cette page
+			{
+				measurement_target = 0;
+				counter_steps = 0;
+				return;
+			}
 		}
 	}
-
 	// ** Analyse des Commandes **
 	// Vérifier q'une commande est activé et mettre le programme en attente de
 	// la prochaine commande.
@@ -758,163 +829,171 @@ void read_joystick()
 ************************************************************************************************/
 void updateLCD()
 {
-	//lcd.setCursor(0,0);
-	//lcd.print(debug_var);
+	lcd.setCursor(0,0);
+	lcd.print(debug_var);
 
-	if (window_Fail)
+	if ((window_Time + window_Tempo) < millis())
 	{
-		//********| System Failure |*********//
-		//********|<-Abort  Retry->|*********//
-		lcd.setCursor(0, 0);
-		lcd.print(" System Failure ");
-		lcd.setCursor(0, 1);
-		lcd.print("<-Abort  Retry->");
-	}
-	else if (window_Menu)
-	{
-		//********| Spool Measurer |*********//
-		//********|<-Manual  Auto->|*********//
-		lcd.setCursor(0, 0);
-		lcd.print(" Spool Measurer ");
-		lcd.setCursor(0, 1);
-		lcd.print("<-Manual  Auto->");
-	}
-	else if (window_Manual_run)
-	{
-		//********|M.   Lgt:  1.93m|*********//
-		//********|  Speed:0   rpm |*********//
-		lcd.setCursor(0, 0);
-		lcd.print("M. Lgt : ");
-		lcd.setCursor(9, 0);
-		lcd.print("      ");
-		lcd.setCursor(9, 0);
-		lcd.print(measurement);
-		//lcd.setCursor(15, 0);
-		lcd.print("m            ");
-		lcd.setCursor(0, 1);
-		lcd.print("Speed : ");
-		lcd.setCursor(8, 1);
-		lcd.print("         ");
-		lcd.setCursor(8, 1);
-		lcd.print(actual_speed * 2.7);
-		//lcd.setCursor(13, 1);
-		lcd.print("rpm    ");
-	}
-	else if (window_Manual_init)
-	{
-		//********|M.   Lgt:  1.93m|*********//
-		//********|<-Menu   Start->|*********//
-		lcd.setCursor(0, 0);
-		lcd.print("M. Lgt : ");
-		lcd.setCursor(9, 0);
-		lcd.print("         ");
-		lcd.setCursor(9, 0);
-		lcd.print(measurement);
-		lcd.print("m");
-		lcd.setCursor(0, 1);
-		lcd.print("<-Menu   Start->");
-	}
-	else if (window_Auto_init)
-	{
-		//********| Choose length! |*********//
-		//********| Lgt:  23.01 m  |*********//
-		lcd.setCursor(0, 0);
-		lcd.print(" Choose length! ");
-		lcd.setCursor(0, 1);
-		lcd.print(" Lgt: ");
-		lcd.setCursor(6, 1);
-		lcd.print("      ");
-		lcd.setCursor(6, 1);
-		lcd.print(measurement_target);
-		lcd.setCursor(12, 1);
-		lcd.print(" m  ");
-	}
-	else if (window_Auto_run)
-	{
-		//********| 002.22m/230.00m|*********//
-		//********|  Speed:0   rpm |*********//
-		lcd.setCursor(0, 0);
-		lcd.print(" ");
-		lcd.setCursor(1, 0);
-		lcd.print("      ");
-		lcd.setCursor(1, 0);
-		lcd.print(measurement);
-		lcd.setCursor(7, 0);
-		lcd.print("m/");
-		lcd.setCursor(9, 0);
-		lcd.print("      ");
-		lcd.setCursor(9, 0);
-		lcd.print(measurement_target);
-		lcd.setCursor(15, 0);
-		lcd.print("m");
+		window_Time = millis();
 
-		lcd.setCursor(0, 1);
-		lcd.print("  Speed:");
-		lcd.setCursor(9, 1);
-		lcd.print("    ");
-		lcd.setCursor(8, 1);
-		lcd.print(actual_speed * 2.7);
-		lcd.setCursor(13, 1);
-		lcd.print("rpm ");
-	}
-	else if (window_Auto_paused)
-	{
-		//********|     Paused     |*********//
-		//********|     23.01 m    |*********//
-		lcd.setCursor(0, 0);
-		lcd.print(" ");
-		lcd.setCursor(1, 0);
-		lcd.print("      ");
-		lcd.setCursor(1, 0);
-		lcd.print(measurement);
-		lcd.setCursor(7, 0);
-		lcd.print("m/");
-		lcd.setCursor(9, 0);
-		lcd.print("      ");
-		lcd.setCursor(9, 0);
-		lcd.print(measurement_target);
-		lcd.setCursor(15, 0);
-		lcd.print("m");
+		if (window_Fail)
+		{
+			//********| System Failure |*********//
+			//********|<-Abort  Retry->|*********//
+			lcd.setCursor(0, 0);
+			lcd.print(" System Failure ");
+			lcd.setCursor(0, 1);
+			lcd.print("<-Abort  Retry->");
+		}
+		else if (window_Menu)
+		{
+			//********| Spool Measurer |*********//
+			//********|<-Manual  Auto->|*********//
+			lcd.setCursor(0, 0);
+			if (debug_var == 0)
+			{
+				lcd.print(" Spool Measurer ");
+			}
+			lcd.setCursor(0, 1);
+			lcd.print("<-Manual  Auto->");
+		}
+		else if (window_Manual_run)
+		{
+			//********|M.   Lgt:  1.93m|*********//
+			//********|  Speed:0   rpm |*********//
+			lcd.setCursor(0, 0);
+			lcd.print("M. Lgt : ");
+			lcd.setCursor(9, 0);
+			lcd.print("      ");
+			lcd.setCursor(9, 0);
+			lcd.print(measurement);
+			//lcd.setCursor(15, 0);
+			lcd.print("m            ");
+			lcd.setCursor(0, 1);
+			lcd.print("Speed : ");
+			lcd.setCursor(8, 1);
+			lcd.print("         ");
+			lcd.setCursor(8, 1);
+			lcd.print(actual_speed * 2.7);
+			//lcd.setCursor(13, 1);
+			lcd.print("rpm    ");
+		}
+		else if (window_Manual_init)
+		{
+			//********|M.   Lgt:  1.93m|*********//
+			//********|<-Menu   Start->|*********//
+			lcd.setCursor(0, 0);
+			lcd.print("M. Lgt : ");
+			lcd.setCursor(9, 0);
+			lcd.print("         ");
+			lcd.setCursor(9, 0);
+			lcd.print(measurement);
+			lcd.print("m");
+			lcd.setCursor(0, 1);
+			lcd.print("<-Menu   Start->");
+		}
+		else if (window_Auto_init)
+		{
+			//********| Choose length! |*********//
+			//********| Lgt:  23.01 m  |*********//
+			lcd.setCursor(0, 0);
+			lcd.print(" Choose length! ");
+			lcd.setCursor(0, 1);
+			lcd.print(" Lgt: ");
+			lcd.setCursor(6, 1);
+			lcd.print("      ");
+			lcd.setCursor(6, 1);
+			lcd.print(measurement_target);
+			lcd.setCursor(12, 1);
+			lcd.print(" m  ");
+		}
+		else if (window_Auto_run)
+		{
+			//********| 002.22m/230.00m|*********//
+			//********|  Speed:0   rpm |*********//
+			lcd.setCursor(0, 0);
+			lcd.print(" ");
+			lcd.setCursor(1, 0);
+			lcd.print("      ");
+			lcd.setCursor(1, 0);
+			lcd.print(measurement);
+			lcd.setCursor(7, 0);
+			lcd.print("m/");
+			lcd.setCursor(9, 0);
+			lcd.print("      ");
+			lcd.setCursor(9, 0);
+			lcd.print(measurement_target);
+			lcd.setCursor(15, 0);
+			lcd.print("m");
 
-		lcd.setCursor(0, 1);
-		lcd.print("     PAUSED     ");
-	}
-	else if (window_Manu_paused)
-	{
-		//********|     Paused     |*********//
-		//********|     23.01 m    |*********//
-		lcd.setCursor(0, 0);
-		lcd.print("M. Lgt : ");
-		lcd.setCursor(9, 0);
-		lcd.print("      ");
-		lcd.setCursor(9, 0);
-		lcd.print(measurement);
+			lcd.setCursor(0, 1);
+			lcd.print("  Speed:");
+			lcd.setCursor(9, 1);
+			lcd.print("    ");
+			lcd.setCursor(8, 1);
+			lcd.print(actual_speed * 2.7);
+			lcd.setCursor(13, 1);
+			lcd.print("rpm ");
+		}
+		else if (window_Auto_paused)
+		{
+			//********|     Paused     |*********//
+			//********|     23.01 m    |*********//
+			lcd.setCursor(0, 0);
+			lcd.print(" ");
+			lcd.setCursor(1, 0);
+			lcd.print("      ");
+			lcd.setCursor(1, 0);
+			lcd.print(measurement);
+			lcd.setCursor(7, 0);
+			lcd.print("m/");
+			lcd.setCursor(9, 0);
+			lcd.print("      ");
+			lcd.setCursor(9, 0);
+			lcd.print(measurement_target);
+			lcd.setCursor(15, 0);
+			lcd.print("m");
 
-		lcd.setCursor(0, 1);
-		lcd.print("     PAUSED     ");
-	}
-	else if (window_Finish)
-	{
-		//********|   Finished !   |*********//
-		//********|     23.01 m    |*********//
-		lcd.setCursor(0, 0);
-		lcd.print("    Finished !   ");
-		lcd.setCursor(0, 1);
-		lcd.print("    ");
-		lcd.setCursor(5, 1);
-		lcd.print("      ");
-		lcd.setCursor(4, 1);
-		lcd.print(measurement);
-		lcd.print("m         ");
-	}
-	else
-	{
-		//********| System Failure |*********//
-		//********|<-Abort  Retry->|*********//
-		lcd.setCursor(0, 0);
-		lcd.print(" System Failure ");
-		lcd.setCursor(0, 1);
-		lcd.print("<-Abort  Retry->");
+			lcd.setCursor(0, 1);
+			lcd.print("     PAUSED     ");
+		}
+		else if (window_Manu_paused)
+		{
+			//********|     Paused     |*********//
+			//********|     23.01 m    |*********//
+			lcd.setCursor(0, 0);
+			lcd.print("M. Lgt : ");
+			lcd.setCursor(9, 0);
+			lcd.print("      ");
+			lcd.setCursor(9, 0);
+			lcd.print(measurement);
+
+			lcd.setCursor(0, 1);
+			lcd.print("     PAUSED     ");
+		}
+		else if (window_Finish)
+		{
+			//********|   Finished !   |*********//
+			//********|     23.01 m    |*********//
+			lcd.setCursor(0, 0);
+			lcd.print("    Finished !   ");
+			lcd.setCursor(0, 1);
+			lcd.print("    ");
+			lcd.setCursor(5, 1);
+			lcd.print("      ");
+			lcd.setCursor(4, 1);
+			lcd.print(measurement);
+			lcd.print("m         ");
+		}
+		else
+		{
+			//********| System Failure |*********//
+			//********|<-Abort  Retry->|*********//
+			lcd.setCursor(0, 0);
+			lcd.print(" System Failure ");
+			lcd.setCursor(0, 1);
+			lcd.print("<-Abort  Retry->");
+		}
 	}
 }
 
