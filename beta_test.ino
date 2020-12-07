@@ -32,11 +32,9 @@ Liste des Bug :
 - 
 
 A faire :
-- Bug : Changer le design du support du servo pour contraindre le filament
-- Ajout : Création boitier electrique
 - Bug : Faire un balais de préinage pour la bobine In
-
-
+- Bug : Happy stop vue une fois ?
+- Ajout : Acceleration de la vitesse de setting de la longueure si appuye long sur X + et - ?
 
 
 Fait/traité :
@@ -74,6 +72,12 @@ Fait/traité :
 - Ajout : Calibration plus précise de la roues ? (Sur 10 m de filament mesuré, variation de 1cm en moyenne)
 - Bug : Réduire la vitesse du servo moteur --> Ajout d'une constante de vitesse
 - Ajout : Activer le servo QUE pendant la rotation
+- Bug : Changer le design du support du servo pour contraindre le filament
+- Ajout : Création boitier electrique
+- Ajout : Imprimer Support IHM, ElectronicBox, métronome
+- Bug : Augmenter l'angle du Guide : ok
+- Ajout : Detecteur de fin de filament
+- Bug : Ecran blink lors du faillure systeme
 
 */
 
@@ -94,10 +98,12 @@ Fait/traité :
 	//Pin du Joystick
 	const int PIN_X = A0;	 // analog pin connected to X output
 	const int PIN_Y = A1;	 // analog pin connected to Y output
-	const int PIN_CLICK = 3; // Digital pin connected to Y output
+	const int PIN_CLICK = 5; // Digital pin connected to Y output
 	//Pin Fourche Optique
 	const byte PIN_FOURCHE = 2; //Digital Pin connected to optical switch
 	const int PIN_SERVO = 4;	// PWM Pin pour le servo moteur
+	//Pin Switch fin de filament
+	const int PIN_SWITCH = 3; //Analog Pin connected to Switch
 
 //******* Déclaration des Variables de statu *************
 	//Variable des bouton joystick
@@ -156,6 +162,9 @@ Fait/traité :
 	//********| System Failure |*********//
 	//********|<-Abort  Retry->|*********//
 	bool window_Fail = 0;
+	//********|   No Filament  |*********//
+	//********|<-Abort  Retry->|*********//
+	bool window_Fail_Presence = 0;
 
 	//Frame Rate de la mise a jours de l'affichage en millis
 	unsigned int window_Tempo = 0;
@@ -202,12 +211,15 @@ Fait/traité :
 	//nombre de fenetre sur la roue codeuse
 	const int encoder_hole = 2;
 	//Course de la bobine lors de la décélération de 60 RPM à 0
-	const float distance_deceleration = 0.60;
+	const float distance_deceleration = 1.5;
 	//Variable de temporisation pour éviter les faux signaux de la fourche optique
 	static volatile unsigned long debounce = 0;
+		//Variable de temporisation pour éviter les faux signaux ddu swhitch
+	static volatile unsigned long debounce_switch = 0;
 	//Temps de latence de la fourche optique pour s'assurer d'une bonne mesure
 	const int latence_fourche = 500;
-
+	//Temps de latence de la fourche optique pour s'assurer d'une bonne mesure
+	const int latence_switch = 20000;
 //******* Variable pour la fonction de TimeOut **********
 
 	//Variable du dernier temps de mesure via millis()
@@ -222,9 +234,9 @@ Fait/traité :
 	ServoTimer2 servo_guide; //Servo name is myservo
 
 	// Position du millieu du servo moteur en degres pendant le fonctionnement
-	const int position_middle = 1500;
+	const int position_middle = 1400;
 	// Course du servo moteur en microseconde pendant le fonctionnement
-	const int position_variation = 600;
+	const int position_variation = 800;
 	// vitesse du guide en fonction de la vitesse du moteur
 	const int position_speed = 10;
 	// Position de départ du servo moteur en microseconde  pendant le fonctionnement
@@ -263,8 +275,6 @@ void setup()
 	Timer1.initialize(20);
 	Timer1.attachInterrupt(timerMotor);
 
-	// Init de l'interrupt de compteur de la fourche optique en fonction du soulevement du signal
-	attachInterrupt(digitalPinToInterrupt(PIN_FOURCHE), measure_filament, RISING);
 
 	//Initialisation du LCD I2C
 	lcd.init();
@@ -282,11 +292,17 @@ void setup()
 	// Pin Fourche
 	pinMode(PIN_FOURCHE, INPUT_PULLUP);
 	pinMode(PIN_CLICK, INPUT_PULLUP);
+	pinMode(PIN_SWITCH, OUTPUT);
+
+	// Init de l'interrupt de compteur de la fourche optique en fonction du soulevement du signal
+	attachInterrupt(digitalPinToInterrupt(PIN_FOURCHE), measure_filament, RISING);
+	attachInterrupt(digitalPinToInterrupt(PIN_SWITCH), presence_filament, CHANGE);
 
 	//init du servo Moteur Guide
 	servo_guide.attach(PIN_SERVO); // attaches the servo signal pin
 	delay(200);
 	servo_guide.write(position_middle);// positionnement au milieu
+	delay(400);
 	position_servo = servo_guide.read(); // récupération de la position du servo moteur
 	servo_guide.detach(); // désactivation du couple
 
@@ -300,6 +316,7 @@ void setup()
 */
 void loop()
 {
+	//debug_var = digitalRead(PIN_SWITCH) +1 ;
 	measurement = counter_steps * perimeter_gear / encoder_hole;
 
 	read_joystick();   					// Lectue Joystick
@@ -307,7 +324,9 @@ void loop()
 	updateLCD();	   					// Mise a jours du LCD
 	check_Target();						// Vérification si la mesure est proche de la cible
 	servoGuide_Running();				// Rotation du Servo moteur Guide
-	if (MOTOR_ENABLE && !window_Fail) 	// Activation du moteur
+	
+
+	if (MOTOR_ENABLE && !window_Fail && !window_Fail_Presence) 	// Activation du moteur
 	{
 		digitalWrite(PIN_ENABLE_DRIVER, LOW);
 	}
@@ -316,19 +335,18 @@ void loop()
 		digitalWrite(PIN_ENABLE_DRIVER, HIGH);
 	}
 
-	if (MOTOR_RUN && !window_Fail) 		//Augmentation de la vitesse à la target
+	if (MOTOR_RUN && !window_Fail && !window_Fail_Presence) 		//Augmentation de la vitesse à la target
 	{
 		increase_speed();
-		
 	}
 	else 								//Diminution de la vitesse du moteur jusqu'à l'arret
 	{
 		decrease_speed();
 	}
 
+	
 	//Vérification que nous ne somme pas en TimeOut (plus de mesure depuis X secondes)
 	check_time_measurement = previous_time_measurement + timeout;
-
 	if (actual_speed > 0 && check_time_measurement < millis())
 	{
 		if (window_Auto_run || window_Manual_run)
@@ -361,7 +379,7 @@ void running_program()
 		return; //<- A tester VS le fonctionnement du programme en auto
 	}
 
-	if (window_Fail)
+	if (window_Fail || window_Fail_Presence)
 	{
 		if (Y_MOIN)
 		{ //abort du process et retour au menu principal
@@ -372,16 +390,25 @@ void running_program()
 		}
 		if (Y_PLUS)
 		{ //Retry avec reset du compteur timeout
-			previous_time_measurement = millis();
-			if (window_Auto_run || window_Auto_paused || window_Auto_init)
+			
+			if (digitalRead(PIN_SWITCH))
 			{
-				MOTOR_RUN = 1;
+				window_Fail_Presence = 1;
 				window_Fail = 0;
 			}
-			else if (window_Manu_paused || window_Manual_init || window_Manual_run)
+			else if ((window_Auto_run || window_Auto_paused || window_Auto_init) )
 			{
 				MOTOR_RUN = 1;
 				window_Fail = 0;
+				window_Fail_Presence = 0;
+				previous_time_measurement = millis();
+			}
+			else if ((window_Manu_paused || window_Manual_init || window_Manual_run) )
+			{
+				MOTOR_RUN = 1;
+				window_Fail = 0;
+				window_Fail_Presence = 0;
+				previous_time_measurement = millis();
 			}
 		}
 	}
@@ -413,8 +440,17 @@ void running_program()
 		{
 			resetIHM();
 			window_Manual_run = 1;
-			MOTOR_RUN = 1;
-			previous_time_measurement = millis();
+
+			if (digitalRead(PIN_SWITCH))
+			{
+				window_Fail_Presence = 1;
+			}
+			else
+			{
+				MOTOR_RUN = 1;
+				previous_time_measurement = millis();
+			}
+
 		}
 	}
 	else if (window_Manual_run)
@@ -436,9 +472,18 @@ void running_program()
 		if (Y_PLUS)
 		{
 			resetIHM();
-			MOTOR_RUN = 1;
 			window_Manual_run = 1;
-			previous_time_measurement = millis();
+			if (digitalRead(PIN_SWITCH))
+			{
+				window_Fail_Presence = 1;
+			}
+			else 
+			{
+				
+				MOTOR_RUN = 1;
+				previous_time_measurement = millis();
+			}
+
 		}
 	}
 	else if (window_Finish)
@@ -462,8 +507,16 @@ void running_program()
 		{
 			resetIHM();
 			window_Auto_run = 1;
-			MOTOR_RUN = 1;
-			previous_time_measurement = millis();
+			if (digitalRead(PIN_SWITCH))
+			{
+				window_Fail_Presence = 1;
+			}
+			else 
+			{
+				
+				MOTOR_RUN = 1;
+				previous_time_measurement = millis();
+			}
 		}
 	}
 	else if (window_Auto_run)
@@ -484,10 +537,19 @@ void running_program()
 		}
 		if (Y_PLUS)
 		{
-			resetIHM();
-			MOTOR_RUN = 1;
 			window_Auto_run = 1;
-			previous_time_measurement = millis();
+			resetIHM();
+			if (digitalRead(PIN_SWITCH))
+			{
+				window_Fail_Presence = 1;
+			}
+			else 
+			{
+				
+				MOTOR_RUN = 1;
+				
+				previous_time_measurement = millis();
+			}
 		}
 	}
 	commande_waiting = 0;
@@ -577,6 +639,8 @@ void emergency_stop()
 ************************************************************************************************/
 void timerMotor()
 {
+
+
 	if (actual_speed == 0)
 		return;
 
@@ -640,7 +704,7 @@ void servoGuide_Running()
 			//debug_var = position_servo;
 		}
 	}
-	else
+	else if (start_servo == 0)
 	{
 		servo_guide.detach(); // coupe le couple du servo moteur guide
 		start_servo = 1;
@@ -662,7 +726,26 @@ void measure_filament()
 		counter_steps += 1;
 		debounce = micros();
 		previous_time_measurement = millis();
+		
 	}
+
+}
+
+/********************************* Fonction vérification fin de filament *******************
+ *
+ * - Vérifie la presence de filament
+ * - Renvoie faux si le filament est absent --> Emergency stop 
+ * 
+************************************************************************************************/
+bool presence_filament()
+{
+		//Vérification de la présence de fil
+	if ((window_Auto_run || window_Manual_run) && (digitalRead(PIN_SWITCH)))
+	{
+			window_Fail_Presence = 1;
+			emergency_stop();
+	}
+
 }
 
 /********************************* Fonction de Lecture du Joystick *****************************
@@ -775,7 +858,7 @@ void read_joystick()
 			}
 			else if (window_Auto_run || window_Manual_run)
 			{
-				if (!MOTOR_RUN)
+				if (!MOTOR_RUN && digitalRead(PIN_SWITCH))
 				{
 					target_speed = max_speed / 2;
 					MOTOR_RUN = 1;
@@ -830,6 +913,7 @@ void read_joystick()
  * 		- window_Paused
  * 		- window_Finish
  * 		- window_Fail
+ * 		- window_Fail_Presence
  *  
  * 
 ************************************************************************************************/
@@ -851,6 +935,15 @@ void updateLCD()
 			//********|<-Abort  Retry->|*********//
 			lcd.setCursor(0, 0);
 			lcd.print(" System Failure ");
+			lcd.setCursor(0, 1);
+			lcd.print("<-Abort  Retry->");
+		}
+		else if (window_Fail_Presence)
+		{
+			//********|   No Filament  |*********//
+			//********|<-Abort  Retry->|*********//
+			lcd.setCursor(0, 0);
+			lcd.print("   No Filament  ");
 			lcd.setCursor(0, 1);
 			lcd.print("<-Abort  Retry->");
 		}
@@ -999,7 +1092,10 @@ void updateLCD()
 			//********| System Failure |*********//
 			//********|<-Abort  Retry->|*********//
 			lcd.setCursor(0, 0);
-			lcd.print(" System Failure ");
+			if (debug_var == 0)
+			{
+				lcd.print(" System Failure ");
+			}
 			lcd.setCursor(0, 1);
 			lcd.print("<-Abort  Retry->");
 		}
@@ -1022,4 +1118,5 @@ void resetIHM()
 	window_Auto_paused = 0;
 	window_Finish = 0;
 	window_Fail = 0;
+	window_Fail_Presence = 0;
 }
