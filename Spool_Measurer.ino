@@ -100,7 +100,9 @@ Fait/traité :
 	const int PIN_Y = A1;	 // analog pin connected to Y output
 	const int PIN_CLICK = 5; // Digital pin connected to Y output
 	//Pin Fourche Optique
-	const byte PIN_FOURCHE = 2; //Digital Pin connected to optical switch
+	const byte PIN_FOURCHE = 2; //Digital Pin connected to optical switch for interupt
+	const int PIN_A_FOURCHE = A3; //Analog pin to optical switch
+
 	const int PIN_SERVO = 4;	// PWM Pin pour le servo moteur
 	//Pin Switch fin de filament
 	const int PIN_SWITCH = 3; //Analog Pin connected to Switch
@@ -213,13 +215,12 @@ Fait/traité :
 	//Course de la bobine lors de la décélération de 60 RPM à 0
 	const float distance_deceleration = 1.5;
 	//Variable de temporisation pour éviter les faux signaux de la fourche optique
-	static volatile unsigned long debounce = 0;
+	static volatile unsigned long debounce = 0 ;
 		//Variable de temporisation pour éviter les faux signaux ddu swhitch
 	static volatile unsigned long debounce_switch = 0;
 	//Temps de latence de la fourche optique pour s'assurer d'une bonne mesure
 	const int latence_fourche = 500;
-	//Temps de latence de la fourche optique pour s'assurer d'une bonne mesure
-	const int latence_switch = 20000;
+
 //******* Variable pour la fonction de TimeOut **********
 
 	//Variable du dernier temps de mesure via millis()
@@ -290,7 +291,7 @@ void setup()
 	digitalWrite(PIN_DIR, actual_direction);
 
 	// Pin Fourche
-	pinMode(PIN_FOURCHE, INPUT_PULLUP);
+	pinMode(PIN_FOURCHE, INPUT);
 	pinMode(PIN_CLICK, INPUT_PULLUP);
 	pinMode(PIN_SWITCH, OUTPUT);
 
@@ -721,13 +722,14 @@ void servoGuide_Running()
 void measure_filament()
 {
 	// Vérifier à nouveau que le codeur envoie un bon signal puis vérifier que le temps est supérieur à 1000 microsecondes et vérifier à nouveau que le signal est correct.
-	if (digitalRead(PIN_FOURCHE) && (micros() - debounce > latence_fourche) && digitalRead(PIN_FOURCHE))
-	{
-		counter_steps += 1;
+	if (digitalRead(PIN_FOURCHE) && (micros()-debounce > latence_fourche) && digitalRead(PIN_FOURCHE))
+	{	
 		debounce = micros();
+		counter_steps += 1;
 		previous_time_measurement = millis();
 		
 	}
+	else;
 
 }
 
