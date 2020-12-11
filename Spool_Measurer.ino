@@ -22,9 +22,6 @@
 /* Code : @BeBerT 																	*/
 /* En charge du projet : @SebTr @DamCr @LudoGi @BeBerT 								*/
 /* Library externe utilisé :  ServoTime2 : https://github.com/nabontra/ServoTimer2 	*/
-/* Lien du projet Onshape : https://cad.onshape.com/documents/6e38f85efcf624cf0dfd1f8a/w/b923c5393b2d579b6667d7b0/e/eeb6654811e7cc9f2c1ab6ce	*/
-
-
 
 /*
 
@@ -32,8 +29,6 @@ Liste des Bug :
 - 
 
 A faire :
-- Bug : Faire un balais de préinage pour la bobine In
-- Bug : Happy stop vue une fois ?
 - Ajout : Acceleration de la vitesse de setting de la longueure si appuye long sur X + et - ?
 
 
@@ -78,7 +73,9 @@ Fait/traité :
 - Bug : Augmenter l'angle du Guide : ok
 - Ajout : Detecteur de fin de filament
 - Bug : Ecran blink lors du faillure systeme
-
+- Bug : Faire un balais de préinage pour la bobine In
+- Bug : Happy stop vue une fois ?
+- Bug : de la mesure et de la présence de filament --> Update du schémaeletrique (avec un NE555) plus passage des interrupts de Rising a falling
 */
 
 #include <TimerOne.h>
@@ -101,9 +98,9 @@ Fait/traité :
 	const int PIN_CLICK = 5; // Digital pin connected to Y output
 	//Pin Fourche Optique
 	const byte PIN_FOURCHE = 2; //Digital Pin connected to optical switch for interupt
-	const int PIN_A_FOURCHE = A3; //Analog pin to optical switch
+	//const int PIN_A_FOURCHE = A3; //Analog pin to optical switch
 
-	const int PIN_SERVO = 4;	// PWM Pin pour le servo moteur
+	const int PIN_SERVO = 7;	// PWM Pin pour le servo moteur
 	//Pin Switch fin de filament
 	const int PIN_SWITCH = 3; //Analog Pin connected to Switch
 
@@ -207,19 +204,20 @@ Fait/traité :
 	//                            II
 
 	//périmetre de la roue denté de mesure en mm
-	const float perimeter_gear = 0.0343581;
+	const float perimeter_gear = 0.03412;//0.03424;//0.03436;
 	// avec une roue de 0.0339,   6m mesurer = 5.92m
 
 	//nombre de fenetre sur la roue codeuse
 	const int encoder_hole = 2;
 	//Course de la bobine lors de la décélération de 60 RPM à 0
-	const float distance_deceleration = 1.5;
+	const float distance_deceleration = 0.7;
 	//Variable de temporisation pour éviter les faux signaux de la fourche optique
 	static volatile unsigned long debounce = 0 ;
 		//Variable de temporisation pour éviter les faux signaux ddu swhitch
 	static volatile unsigned long debounce_switch = 0;
 	//Temps de latence de la fourche optique pour s'assurer d'une bonne mesure
 	const int latence_fourche = 500;
+	bool counter_temp = false;
 
 //******* Variable pour la fonction de TimeOut **********
 
@@ -293,11 +291,11 @@ void setup()
 	// Pin Fourche
 	pinMode(PIN_FOURCHE, INPUT);
 	pinMode(PIN_CLICK, INPUT_PULLUP);
-	pinMode(PIN_SWITCH, OUTPUT);
+	pinMode(PIN_SWITCH, INPUT_PULLUP);
 
-	// Init de l'interrupt de compteur de la fourche optique en fonction du soulevement du signal
-	attachInterrupt(digitalPinToInterrupt(PIN_FOURCHE), measure_filament, RISING);
-	attachInterrupt(digitalPinToInterrupt(PIN_SWITCH), presence_filament, CHANGE);
+	// Init de l'interrupt de compteur de la fourche optique et de la présence en fonction du soulevement du signal
+	attachInterrupt(digitalPinToInterrupt(PIN_FOURCHE), measure_filament, FALLING);
+	attachInterrupt(digitalPinToInterrupt(PIN_SWITCH), presence_filament, FALLING);
 
 	//init du servo Moteur Guide
 	servo_guide.attach(PIN_SERVO); // attaches the servo signal pin
@@ -317,7 +315,7 @@ void setup()
 */
 void loop()
 {
-	//debug_var = digitalRead(PIN_SWITCH) +1 ;
+	//debug_var = digitalRead(PIN_SWITCH)+1;
 	measurement = counter_steps * perimeter_gear / encoder_hole;
 
 	read_joystick();   					// Lectue Joystick
@@ -392,7 +390,7 @@ void running_program()
 		if (Y_PLUS)
 		{ //Retry avec reset du compteur timeout
 			
-			if (digitalRead(PIN_SWITCH))
+			if (!digitalRead(PIN_SWITCH))
 			{
 				window_Fail_Presence = 1;
 				window_Fail = 0;
@@ -442,7 +440,7 @@ void running_program()
 			resetIHM();
 			window_Manual_run = 1;
 
-			if (digitalRead(PIN_SWITCH))
+			if (!digitalRead(PIN_SWITCH))
 			{
 				window_Fail_Presence = 1;
 			}
@@ -462,6 +460,12 @@ void running_program()
 			resetIHM();
 			window_Manu_paused = 1;
 		}
+		else if (Y_PLUS && actual_speed == 0)
+		{
+			MOTOR_RUN = 1;
+			target_speed = max_speed / 2;
+
+		}
 	}
 	else if (window_Manu_paused)
 	{
@@ -474,7 +478,7 @@ void running_program()
 		{
 			resetIHM();
 			window_Manual_run = 1;
-			if (digitalRead(PIN_SWITCH))
+			if (!digitalRead(PIN_SWITCH))
 			{
 				window_Fail_Presence = 1;
 			}
@@ -508,7 +512,7 @@ void running_program()
 		{
 			resetIHM();
 			window_Auto_run = 1;
-			if (digitalRead(PIN_SWITCH))
+			if (!digitalRead(PIN_SWITCH))
 			{
 				window_Fail_Presence = 1;
 			}
@@ -540,7 +544,7 @@ void running_program()
 		{
 			window_Auto_run = 1;
 			resetIHM();
-			if (digitalRead(PIN_SWITCH))
+			if (!digitalRead(PIN_SWITCH))
 			{
 				window_Fail_Presence = 1;
 			}
@@ -722,15 +726,27 @@ void servoGuide_Running()
 void measure_filament()
 {
 	// Vérifier à nouveau que le codeur envoie un bon signal puis vérifier que le temps est supérieur à 1000 microsecondes et vérifier à nouveau que le signal est correct.
-	if (digitalRead(PIN_FOURCHE) && (micros()-debounce > latence_fourche) && digitalRead(PIN_FOURCHE))
+	if (!digitalRead(PIN_FOURCHE) && (micros()-debounce > latence_fourche) && !digitalRead(PIN_FOURCHE))
 	{	
+		
 		debounce = micros();
 		counter_steps += 1;
 		previous_time_measurement = millis();
 		
 	}
 	else;
-
+	/*if (analogRead(A3)<530 && counter_temp==false)
+	{
+		counter_steps += 1;
+		counter_temp = true;
+		
+	}
+	else if (analogRead(A3)>200 && counter_temp==true)
+	{
+		counter_temp = false;
+		
+	}*/
+	//counter_steps += 1;
 }
 
 /********************************* Fonction vérification fin de filament *******************
@@ -742,7 +758,7 @@ void measure_filament()
 bool presence_filament()
 {
 		//Vérification de la présence de fil
-	if ((window_Auto_run || window_Manual_run) && (digitalRead(PIN_SWITCH)))
+	if ((window_Auto_run || window_Manual_run) && (digitalRead(PIN_SWITCH)==0))
 	{
 			window_Fail_Presence = 1;
 			emergency_stop();
@@ -860,7 +876,7 @@ void read_joystick()
 			}
 			else if (window_Auto_run || window_Manual_run)
 			{
-				if (!MOTOR_RUN && digitalRead(PIN_SWITCH))
+				if (!MOTOR_RUN)//digitalRead(PIN_SWITCH))
 				{
 					target_speed = max_speed / 2;
 					MOTOR_RUN = 1;
@@ -965,8 +981,11 @@ void updateLCD()
 		{
 			//********|M.   Lgt:  1.93m|*********//
 			//********|  Speed:0   rpm |*********//
-			lcd.setCursor(0, 0);
-			lcd.print("M. Lgt : ");
+			if(debug_var==0)
+			{
+				lcd.setCursor(0, 0);		
+				lcd.print("M. Lgt : ");
+			}	
 			lcd.setCursor(9, 0);
 			lcd.print("      ");
 			lcd.setCursor(9, 0);
@@ -986,8 +1005,11 @@ void updateLCD()
 		{
 			//********|M.   Lgt:  1.93m|*********//
 			//********|<-Menu   Start->|*********//
-			lcd.setCursor(0, 0);
-			lcd.print("M. Lgt : ");
+			if(debug_var==0)
+			{
+				lcd.setCursor(0, 0);		
+				lcd.print("M. Lgt : ");
+			}	
 			lcd.setCursor(9, 0);
 			lcd.print("         ");
 			lcd.setCursor(9, 0);
